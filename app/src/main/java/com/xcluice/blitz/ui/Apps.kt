@@ -21,8 +21,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -155,7 +160,7 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
         Row(Modifier.padding(4.dp)) {
             for (i in options.indices) {
                 val bg by animateColorAsState(
-                    targetValue = if (i == selected) Pal.Mint else Color.Transparent,
+                    targetValue = if (i == selected) Pal.Ink else Color.Transparent,
                     animationSpec = tween(220),
                     label = "seg"
                 )
@@ -217,7 +222,7 @@ fun AppsPane(
                     onValueChange = { query = it },
                     singleLine = true,
                     textStyle = TextStyle(color = Pal.Ink, fontSize = 15.sp),
-                    cursorBrush = SolidColor(Pal.Mint),
+                    cursorBrush = SolidColor(Pal.Ink),
                     modifier = Modifier.fillMaxWidth(),
                     decorationBox = { inner ->
                         Box {
@@ -240,9 +245,19 @@ fun AppsPane(
                 Spinner(Modifier.size(52.dp))
             }
         } else {
-            LazyColumn(Modifier.fillMaxSize()) {
-                items(list, key = { it.pkg }) { a ->
-                    AppRow(a, a.pkg in selected, onToggle)
+            if (list.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    FloatingBolt(Modifier.size(40.dp))
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(list, key = { it.pkg }) { a ->
+                        AppCell(a, a.pkg in selected, onToggle)
+                    }
                 }
             }
         }
@@ -250,42 +265,58 @@ fun AppsPane(
 }
 
 @Composable
-private fun AppRow(a: AppEntry, on: Boolean, onToggle: (String) -> Unit) {
-    val fill by animateColorAsState(
-        targetValue = if (on) Pal.Mint else Color.Transparent,
-        animationSpec = tween(180),
-        label = "tick"
+private fun AppCell(a: AppEntry, on: Boolean, onToggle: (String) -> Unit) {
+    val pop by animateFloatAsState(
+        targetValue = if (on) 0.84f else 1f,
+        animationSpec = spring(dampingRatio = 0.4f, stiffness = 500f),
+        label = "pop"
     )
-    Row(
+    val ring by animateFloatAsState(if (on) 1f else 0f, label = "ring")
+    Column(
         Modifier
             .fillMaxWidth()
             .bounceClick { onToggle(a.pkg) }
-            .padding(horizontal = 6.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        AppIcon(a.icon, Modifier.size(42.dp).clip(RoundedCornerShape(11.dp)))
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                text = a.label,
-                color = Pal.Ink,
-                fontSize = 15.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+        Box(contentAlignment = Alignment.TopEnd) {
+            AppIcon(
+                a.icon,
+                Modifier
+                    .size(52.dp)
+                    .graphicsLayer {
+                        scaleX = pop
+                        scaleY = pop
+                    }
+                    .clip(RoundedCornerShape(14.dp))
+                    .border(2.dp, Color.White.copy(alpha = ring), RoundedCornerShape(14.dp))
             )
-            val tag = if (a.paths.size > 1) "  ·  split APKs" else ""
-            Text(fmtBytes(a.size) + tag, color = Pal.Ink2, fontSize = 12.sp)
+            if (on) {
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Pal.Ink),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CheckIcon(Modifier.size(13.dp))
+                }
+            }
         }
-        Spacer(Modifier.width(10.dp))
-        Box(
-            Modifier
-                .size(26.dp)
-                .clip(CircleShape)
-                .background(fill)
-                .border(1.5.dp, if (on) Pal.Mint else Color.White.copy(alpha = 0.3f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            if (on) CheckIcon(Modifier.size(16.dp))
-        }
+        Text(
+            text = a.label,
+            color = Pal.Ink,
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp)
+        )
+        Text(
+            text = fmtBytes(a.size),
+            color = Pal.Ink3,
+            fontSize = 10.sp,
+            maxLines = 1
+        )
     }
 }

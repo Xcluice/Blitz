@@ -1,7 +1,14 @@
 package com.xcluice.blitz.ui
 
+import android.os.Build
+import android.view.HapticFeedbackConstants
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.border
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,31 +73,47 @@ fun HomeScreen(onSend: () -> Unit, onReceive: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.Center
+            .padding(horizontal = 22.dp, vertical = 14.dp)
     ) {
         Row(Modifier.popIn(0), verticalAlignment = Alignment.CenterVertically) {
-            BoltIcon(Modifier.size(38.dp))
-            Spacer(Modifier.width(10.dp))
-            Text("Blitz", fontSize = 38.sp, fontWeight = FontWeight.Bold, color = Pal.Ink)
+            BoltIcon(Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Blitz", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth().popIn(60), contentAlignment = Alignment.Center) {
+            PulseRings(Modifier.size(300.dp), startFrac = 0.28f, spread = 1f)
+            Glass(Modifier.size(104.dp), radius = 52.dp, strong = true) {
+                FloatingBolt(Modifier.align(Alignment.Center).size(44.dp))
+            }
         }
         Text(
-            text = "Phone to phone in a straight line. No internet, no cables.",
+            text = "Phone to phone,\nstraight line.",
+            fontSize = 34.sp,
+            lineHeight = 38.sp,
+            fontWeight = FontWeight.Bold,
+            color = Pal.Ink,
+            modifier = Modifier.popIn(120)
+        )
+        Text(
+            text = "No internet. No cables. Just speed.",
             color = Pal.Ink2,
             fontSize = 15.sp,
-            modifier = Modifier
-                .popIn(60)
-                .padding(top = 8.dp, bottom = 30.dp)
+            modifier = Modifier.popIn(160).padding(top = 8.dp, bottom = 26.dp)
         )
-        BigAction("Send", "Pick files, scan the receiver's code", true, 120, onSend)
-        Spacer(Modifier.height(14.dp))
-        BigAction("Receive", "Show a code. Files land in Downloads.", false, 200, onReceive)
-        Spacer(Modifier.height(22.dp))
-        Row(Modifier.popIn(280), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip("5 GHz link")
+        Row(
+            Modifier.fillMaxWidth().popIn(200),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            HomeButton("Send", true, Modifier.weight(1f), onSend)
+            HomeButton("Receive", false, Modifier.weight(1f), onReceive)
+        }
+        Spacer(Modifier.height(18.dp))
+        Row(Modifier.popIn(260), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("5 GHz")
             Chip("4 streams")
             Chip("AES-GCM")
         }
+        Spacer(Modifier.height(6.dp))
     }
 }
 
@@ -107,30 +130,20 @@ private fun Chip(text: String) {
 }
 
 @Composable
-private fun BigAction(title: String, sub: String, send: Boolean, delayMs: Int, onClick: () -> Unit) {
-    Glass(
-        modifier = Modifier
-            .fillMaxWidth()
-            .popIn(delayMs)
-            .bounceClick(onClick = onClick),
-        radius = 30.dp
+private fun HomeButton(title: String, filled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(28.dp)
+    val fg = if (filled) Pal.Bg else Pal.Ink
+    Column(
+        modifier
+            .bounceClick(onClick = onClick)
+            .clip(shape)
+            .background(if (filled) Pal.Ink else Pal.Fill)
+            .border(1.dp, if (filled) Pal.Ink else Pal.Line, shape)
+            .padding(20.dp)
     ) {
-        Row(Modifier.padding(22.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(58.dp)
-                    .clip(CircleShape)
-                    .background(if (send) Pal.Mint else Pal.Coral),
-                contentAlignment = Alignment.Center
-            ) {
-                ArrowIcon(up = send, modifier = Modifier.size(26.dp), color = Pal.Bg)
-            }
-            Spacer(Modifier.width(18.dp))
-            Column {
-                Text(title, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
-                Text(sub, fontSize = 13.sp, color = Pal.Ink2, modifier = Modifier.padding(top = 2.dp))
-            }
-        }
+        ArrowIcon(up = filled, modifier = Modifier.size(24.dp), color = fg)
+        Spacer(Modifier.height(26.dp))
+        Text(title, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = fg)
     }
 }
 
@@ -150,6 +163,7 @@ fun SendScreen(
     encrypt: Boolean,
     onEncrypt: (Boolean) -> Unit,
     onAdd: () -> Unit,
+    onRemoveFile: (Int) -> Unit,
     onClear: () -> Unit,
     onScan: () -> Unit,
     onBack: () -> Unit
@@ -160,7 +174,7 @@ fun SendScreen(
             .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         Text(
-            text = "‹ Back",
+            text = "\u2039 Back",
             color = Pal.Ink2,
             fontSize = 16.sp,
             modifier = Modifier
@@ -196,6 +210,8 @@ fun SendScreen(
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    FloatingBolt(Modifier.size(34.dp))
+                    Spacer(Modifier.height(14.dp))
                     Text(
                         text = "Nothing picked yet.\nPhotos, videos, APKs, anything.",
                         color = Pal.Ink2,
@@ -207,11 +223,23 @@ fun SendScreen(
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize().padding(10.dp)) {
-                    items(fileMetas) { m -> FileRow(m.name, m.size) }
+                    itemsIndexed(fileMetas, key = { i, m -> "$i-${m.name}" }) { i, m ->
+                        Box(Modifier.animateItem().swipeToRemove { onRemoveFile(i) }) {
+                            FileRow(m.name, m.size)
+                        }
+                    }
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
+        if (tab == 0 && fileMetas.isNotEmpty()) {
+            Text(
+                text = "Swipe a file sideways to remove it",
+                color = Pal.Ink3,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 6.dp).align(Alignment.CenterHorizontally)
+            )
+        }
+        Spacer(Modifier.height(10.dp))
         if (canSend || (tab == 0 && fileMetas.isNotEmpty())) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (tab == 0) {
@@ -271,9 +299,19 @@ private fun FileRow(name: String, size: Long) {
 
 // ---------------------------------------------------------------- run / progress
 
+private fun tick(view: android.view.View, strong: Boolean) {
+    val c = if (strong && Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM
+    else HapticFeedbackConstants.CLOCK_TICK
+    view.performHapticFeedback(c)
+}
+
 @Composable
 fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
     val sending = st.role == Role.SEND
+    val view = LocalView.current
+    LaunchedEffect(st.phase) {
+        if (st.phase == Phase.TRANSFERRING) tick(view, false)
+    }
     Column(
         Modifier
             .fillMaxSize()
@@ -300,24 +338,22 @@ fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
             when (st.phase) {
                 Phase.PREPARING, Phase.CONNECTING -> {
-                    Column(
-                        Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Spinner(Modifier.size(84.dp))
-                    }
+                    PhoneLink(
+                        Modifier.align(Alignment.Center).fillMaxWidth().height(150.dp),
+                        active = false, flow = 0f, youAreSender = sending
+                    )
                 }
                 Phase.WAITING -> {
                     val qr = st.qr
                     if (qr != null) QrCard(qr)
                 }
-                Phase.TRANSFERRING -> TransferPanel(st)
+                Phase.TRANSFERRING -> TransferPanel(st, sending)
                 Phase.DONE -> DonePanel(st, sending, onOpen)
                 Phase.ERROR -> {
                     Glass(Modifier.fillMaxWidth().align(Alignment.Center), radius = 24.dp) {
                         Text(
                             text = st.error ?: "Something went wrong.",
-                            color = Pal.Err,
+                            color = Pal.Ink,
                             fontSize = 15.sp,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(22.dp)
@@ -343,15 +379,18 @@ fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
 @Composable
 private fun QrCard(text: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.popIn(0)) {
-        Glass(radius = 30.dp) {
-            Box(Modifier.padding(18.dp)) {
-                Box(
-                    Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White)
-                        .padding(14.dp)
-                ) {
-                    QrImage(text, Modifier.size(250.dp))
+        Box(contentAlignment = Alignment.Center) {
+            PulseRings(Modifier.size(380.dp), startFrac = 0.62f, spread = 1f)
+            Glass(radius = 30.dp) {
+                Box(Modifier.padding(18.dp)) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color.White)
+                            .padding(14.dp)
+                    ) {
+                        QrImage(text, Modifier.size(230.dp))
+                    }
                 }
             }
         }
@@ -360,7 +399,7 @@ private fun QrCard(text: String) {
             color = Pal.Ink2,
             fontSize = 14.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(top = 18.dp, start = 12.dp, end = 12.dp)
+            modifier = Modifier.padding(top = 4.dp, start = 12.dp, end = 12.dp)
         )
         Text(
             text = "Keep both phones close. Wi-Fi and Location must be on.",
@@ -373,36 +412,81 @@ private fun QrCard(text: String) {
 }
 
 @Composable
-private fun TransferPanel(st: UiState) {
+private fun TransferPanel(st: UiState, sending: Boolean) {
     val progress = if (st.total > 0) st.done.toFloat() / st.total.toFloat() else 0f
+    val intensity = if (st.peak > 0.0) (st.speed / st.peak).toFloat().coerceIn(0f, 1f) else 0f
+    // Files go roughly in order, so spread the byte count over them to get a ring per file.
+    val rows = remember(st.items, st.done) {
+        var before = 0L
+        st.items.map { item ->
+            val p = if (item.size <= 0L) 1f
+            else ((st.done - before).toFloat() / item.size.toFloat()).coerceIn(0f, 1f)
+            before += item.size
+            Pair(item, p)
+        }
+    }
+    val finished = rows.count { it.second >= 1f }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        LiquidGauge(progress = progress, modifier = Modifier.size(250.dp)) {
+        PhoneLink(
+            Modifier.fillMaxWidth().height(70.dp),
+            active = true, flow = intensity, youAreSender = sending
+        )
+        Spacer(Modifier.height(10.dp))
+        LiquidGauge(progress = progress, intensity = intensity, modifier = Modifier.size(220.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = fmtMbps(st.speed),
-                    fontSize = 52.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Pal.Ink
-                )
-                Text("MB/s", fontSize = 15.sp, color = Pal.Ink2)
+                RollingText(fmtMbps(st.speed), 48.sp, FontWeight.Bold, Pal.Ink)
+                Text("MB/s", fontSize = 14.sp, color = Pal.Ink2)
                 Text(
                     text = "${(progress * 100).toInt()}%",
                     fontSize = 14.sp,
                     color = Pal.Ink2,
-                    modifier = Modifier.padding(top = 6.dp)
+                    modifier = Modifier.padding(top = 4.dp)
                 )
             }
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Tile("Moved", "${fmtBytes(st.done)} / ${fmtBytes(st.total)}", Modifier.weight(1.5f))
             Tile("Left", fmtTime(st.eta), Modifier.weight(1f))
             Tile("Peak", fmtMbps(st.peak) + " MB/s", Modifier.weight(1f))
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         Glass(Modifier.fillMaxWidth().weight(1f, fill = false), radius = 22.dp) {
             LazyColumn(Modifier.padding(8.dp)) {
-                items(st.items) { it2 -> FileRow(it2.name, it2.size) }
+                itemsIndexed(rows, key = { i, r -> "$i-${r.first.name}" }) { _, r ->
+                    if (r.second < 1f) {
+                        Row(
+                            Modifier
+                                .animateItem()
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RingProgress(r.second, Modifier.size(22.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                text = r.first.name,
+                                color = Pal.Ink,
+                                fontSize = 14.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(fmtBytes(r.first.size), color = Pal.Ink2, fontSize = 12.sp)
+                        }
+                    }
+                }
+                if (finished > 0) {
+                    item(key = "finished") {
+                        Text(
+                            text = "$finished done",
+                            color = Pal.Ink3,
+                            fontSize = 12.sp,
+                            modifier = Modifier.animateItem().padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -428,76 +512,85 @@ private fun Tile(label: String, value: String, modifier: Modifier) {
 @Composable
 private fun DonePanel(st: UiState, sending: Boolean, onOpen: (List<Item>) -> Unit) {
     val pop = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 260f)) }
+    val view = LocalView.current
+    LaunchedEffect(Unit) {
+        tick(view, true)
+        pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 240f))
+    }
     val secs = (st.elapsedMs / 1000.0).coerceAtLeast(0.001)
     val avg = st.total / secs
     val rows = remember(st.items, sending) {
         if (sending) st.items.map { ReceivedRow(it, listOf(it)) } else groupReceived(st.items)
     }
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .size(92.dp)
-                .graphicsLayer {
-                    scaleX = pop.value
-                    scaleY = pop.value
-                }
-                .clip(CircleShape)
-                .background(Pal.Mint),
-            contentAlignment = Alignment.Center
-        ) {
-            CheckIcon(Modifier.size(52.dp))
-        }
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Tile("Size", fmtBytes(st.total), Modifier.weight(1f))
-            Tile("Average", fmtMbps(avg) + " MB/s", Modifier.weight(1.2f))
-            Tile("Time", fmtTime((st.elapsedMs / 1000)), Modifier.weight(0.8f))
-        }
-        Spacer(Modifier.height(14.dp))
-        Glass(Modifier.fillMaxWidth().weight(1f, fill = false), radius = 22.dp) {
-            LazyColumn(Modifier.padding(8.dp)) {
-                items(rows) { row ->
-                    val item = row.item
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = item.name,
-                                color = Pal.Ink,
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            val extra = if (row.parts.size > 1) "  ·  base + ${row.parts.size - 1} splits" else ""
-                            Text(
-                                text = fmtBytes(row.parts.sumOf { p -> p.size }) + extra,
-                                color = Pal.Ink2,
-                                fontSize = 12.sp
-                            )
+    Box(Modifier.fillMaxSize()) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier
+                        .size(92.dp)
+                        .graphicsLayer {
+                            scaleX = pop.value
+                            scaleY = pop.value
                         }
-                        if (!sending && item.uri != null) {
-                            Spacer(Modifier.width(8.dp))
-                            GhostButton(
-                                text = if (item.mime == APK_MIME) "Install" else "Open",
-                                onClick = { onOpen(row.parts) }
-                            )
+                        .clip(CircleShape)
+                        .background(Pal.Ink),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CheckIcon(Modifier.size(52.dp))
+                }
+            }
+            Spacer(Modifier.height(20.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Tile("Size", fmtBytes(st.total), Modifier.weight(1f))
+                Tile("Average", fmtMbps(avg) + " MB/s", Modifier.weight(1.2f))
+                Tile("Time", fmtTime((st.elapsedMs / 1000)), Modifier.weight(0.8f))
+            }
+            Spacer(Modifier.height(14.dp))
+            Glass(Modifier.fillMaxWidth().weight(1f, fill = false), radius = 22.dp) {
+                LazyColumn(Modifier.padding(8.dp)) {
+                    items(rows) { row ->
+                        val item = row.item
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = item.name,
+                                    color = Pal.Ink,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                val extra = if (row.parts.size > 1) "  \u00b7  base + ${row.parts.size - 1} splits" else ""
+                                Text(
+                                    text = fmtBytes(row.parts.sumOf { p -> p.size }) + extra,
+                                    color = Pal.Ink2,
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (!sending && item.uri != null) {
+                                Spacer(Modifier.width(8.dp))
+                                GhostButton(
+                                    text = if (item.mime == APK_MIME) "Install" else "Open",
+                                    onClick = { onOpen(row.parts) }
+                                )
+                            }
                         }
                     }
                 }
             }
+            if (!sending) {
+                Text(
+                    text = "Saved in Downloads/Xcluice Blitz",
+                    color = Pal.Ink3,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 10.dp)
+                )
+            }
         }
-        if (!sending) {
-            Text(
-                text = "Saved in Downloads/Xcluice Blitz",
-                color = Pal.Ink3,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 10.dp)
-            )
-        }
+        Confetti(Modifier.fillMaxWidth().height(220.dp))
     }
 }

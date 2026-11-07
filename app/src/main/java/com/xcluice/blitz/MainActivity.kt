@@ -47,6 +47,9 @@ import com.xcluice.blitz.engine.Phase
 import com.xcluice.blitz.engine.SendItem
 import com.xcluice.blitz.ui.AppEntry
 import com.xcluice.blitz.ui.GlassBg
+import com.xcluice.blitz.ui.LocalTilt
+import com.xcluice.blitz.ui.rememberTilt
+import androidx.compose.runtime.CompositionLocalProvider
 import com.xcluice.blitz.ui.HomeScreen
 import com.xcluice.blitz.ui.RunScreen
 import com.xcluice.blitz.ui.SendScreen
@@ -259,7 +262,9 @@ fun BlitzRoot() {
     }
     BackHandler(enabled = st.phase == Phase.IDLE && picking) { picking = false }
 
-    GlassBg {
+    val tilt = rememberTilt(st.phase == Phase.IDLE || st.phase == Phase.WAITING)
+    CompositionLocalProvider(LocalTilt provides tilt) {
+    GlassBg(drift = st.phase != Phase.TRANSFERRING, rate = 1f) {
         Box(Modifier.fillMaxSize().systemBarsPadding()) {
             val screen = when {
                 st.phase != Phase.IDLE -> 2
@@ -297,6 +302,7 @@ fun BlitzRoot() {
                         encrypt = encrypt,
                         onEncrypt = { encrypt = it },
                         onAdd = { pickLauncher.launch(arrayOf("*/*")) },
+                        onRemoveFile = { idx -> picked = picked.filterIndexed { j, _ -> j != idx } },
                         onClear = {
                             picked = emptyList()
                             selectedApps = emptySet()
@@ -330,5 +336,6 @@ fun BlitzRoot() {
                 }
             }
         }
+    }
     }
 }
