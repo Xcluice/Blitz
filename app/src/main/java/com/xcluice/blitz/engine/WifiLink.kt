@@ -155,6 +155,11 @@ class P2pClient(private val ctx: Context) {
             val s = dialUntil(p, 14_000)
             if (s != null) return s
         }
+        try {
+            cm.bindProcessToNetwork(null)
+        } catch (_: Throwable) {
+        }
+        bound = false
         status("Trying a standard Wi-Fi join. Approve the prompt if it appears.")
         if (trySpecifier(p)) {
             return dialUntil(p, 10_000)
@@ -198,7 +203,7 @@ class P2pClient(private val ctx: Context) {
                     }
                 }
                 cb = callback
-                cm.requestNetwork(req, callback, 30_000)
+                cm.requestNetwork(req, callback, 20_000)
                 c.invokeOnCancellation {
                     try {
                         cm.unregisterNetworkCallback(callback)
@@ -217,10 +222,35 @@ class P2pClient(private val ctx: Context) {
         }
     }
 
+    /** The Wi-Fi Direct link as a Network, so traffic doesn't leak onto the phone's normal Wi-Fi. */
+    @Suppress("DEPRECATION")
+    private fun p2pNetwork(): Network? {
+        return try {
+            for (n in cm.allNetworks) {
+                val name = cm.getLinkProperties(n)?.interfaceName
+                if (name != null && name.startsWith("p2p")) return n
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private var bound = false
+
     private suspend fun dialUntil(p: Pairing, ms: Long): SocketChannel? {
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) {
             currentCoroutineContext().ensureActive()
+            if (!bound) {
+                val n = p2pNetwork()
+                if (n != null) {
+                    try {
+                        bound = cm.bindProcessToNetwork(n)
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
             try {
                 return dialOnce(p.ip, p.port, 1500)
             } catch (e: IOException) {
@@ -243,6 +273,7 @@ class P2pClient(private val ctx: Context) {
             cm.bindProcessToNetwork(null)
         } catch (_: Throwable) {
         }
+        bound = false
         val c = ch
         ch = null
         if (c != null) mgr.removeAndClose(c)
