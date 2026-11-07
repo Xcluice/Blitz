@@ -30,6 +30,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -51,7 +52,10 @@ import com.xcluice.blitz.ui.SendScreen
 import com.xcluice.blitz.ui.appSendItems
 import com.xcluice.blitz.ui.fmtBytes
 import com.xcluice.blitz.ui.loadApps
+import com.xcluice.blitz.engine.ApkInstaller
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -84,10 +88,27 @@ private fun openItem(ctx: Context, item: Item) {
     }
 }
 
+/** One file opens normally; several parts (a split app) go through the package installer together. */
+private fun openItems(ctx: Context, scope: CoroutineScope, parts: List<Item>) {
+    if (parts.size == 1) {
+        openItem(ctx, parts[0])
+        return
+    }
+    scope.launch(Dispatchers.IO) {
+        val err = ApkInstaller.install(ctx, parts)
+        if (err != null) {
+            withContext(Dispatchers.Main) {
+                Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+}
+
 @Composable
 fun BlitzRoot() {
     val st by Blitz.state.collectAsState()
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val view = LocalView.current
 
     var picked by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -245,7 +266,7 @@ fun BlitzRoot() {
                                 picking = false
                             }
                         },
-                        onOpen = { openItem(ctx, it) }
+                        onOpen = { parts -> openItems(ctx, scope, parts) }
                     )
                 }
             }

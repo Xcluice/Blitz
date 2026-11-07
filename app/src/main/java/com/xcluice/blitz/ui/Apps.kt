@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.xcluice.blitz.engine.FileMeta
+import com.xcluice.blitz.engine.Item
 import com.xcluice.blitz.engine.SendItem
 import java.io.File
 
@@ -108,6 +109,42 @@ fun appSendItems(app: AppEntry): List<SendItem> {
         val f = File(app.paths[i])
         val name = if (i == 0) "$clean.apk" else "$clean.split$i.apk"
         out.add(SendItem(Uri.fromFile(f), FileMeta(name, f.length(), APK_MIME)))
+    }
+    return out
+}
+
+/** One line in the received list. [parts] is the base APK first, then its splits (or just the file itself). */
+class ReceivedRow(val item: Item, val parts: List<Item>)
+
+private val SPLIT_RE = Regex("^(.*)\\.split(\\d+)\\.apk$")
+
+/** Folds "Label.split1.apk", "Label.split2.apk" into the "Label.apk" row so they install together. */
+fun groupReceived(items: List<Item>): List<ReceivedRow> {
+    val names = HashSet<String>()
+    for (it in items) names.add(it.name)
+    val byBase = HashMap<String, MutableList<Pair<Int, Item>>>()
+    val splitIdx = HashSet<Int>()
+    for (idx in items.indices) {
+        val m = SPLIT_RE.matchEntire(items[idx].name) ?: continue
+        val base = m.groupValues[1] + ".apk"
+        if (base !in names) continue
+        val n = m.groupValues[2].toIntOrNull() ?: continue
+        byBase.getOrPut(base) { ArrayList() }.add(Pair(n, items[idx]))
+        splitIdx.add(idx)
+    }
+    val out = ArrayList<ReceivedRow>()
+    for (idx in items.indices) {
+        if (idx in splitIdx) continue
+        val item = items[idx]
+        val sp = byBase[item.name]
+        if (sp == null) {
+            out.add(ReceivedRow(item, listOf(item)))
+        } else {
+            val parts = ArrayList<Item>()
+            parts.add(item)
+            for (p in sp.sortedBy { it.first }) parts.add(p.second)
+            out.add(ReceivedRow(item, parts))
+        }
     }
     return out
 }

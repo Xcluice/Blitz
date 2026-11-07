@@ -272,7 +272,7 @@ private fun FileRow(name: String, size: Long) {
 // ---------------------------------------------------------------- run / progress
 
 @Composable
-fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (Item) -> Unit) {
+fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
     val sending = st.role == Role.SEND
     Column(
         Modifier
@@ -426,11 +426,14 @@ private fun Tile(label: String, value: String, modifier: Modifier) {
 }
 
 @Composable
-private fun DonePanel(st: UiState, sending: Boolean, onOpen: (Item) -> Unit) {
+private fun DonePanel(st: UiState, sending: Boolean, onOpen: (List<Item>) -> Unit) {
     val pop = remember { Animatable(0f) }
     LaunchedEffect(Unit) { pop.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 260f)) }
     val secs = (st.elapsedMs / 1000.0).coerceAtLeast(0.001)
     val avg = st.total / secs
+    val rows = remember(st.items, sending) {
+        if (sending) st.items.map { ReceivedRow(it, listOf(it)) } else groupReceived(st.items)
+    }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier
@@ -454,7 +457,8 @@ private fun DonePanel(st: UiState, sending: Boolean, onOpen: (Item) -> Unit) {
         Spacer(Modifier.height(14.dp))
         Glass(Modifier.fillMaxWidth().weight(1f, fill = false), radius = 22.dp) {
             LazyColumn(Modifier.padding(8.dp)) {
-                items(st.items) { item ->
+                items(rows) { row ->
+                    val item = row.item
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -469,13 +473,18 @@ private fun DonePanel(st: UiState, sending: Boolean, onOpen: (Item) -> Unit) {
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Text(fmtBytes(item.size), color = Pal.Ink2, fontSize = 12.sp)
+                            val extra = if (row.parts.size > 1) "  ·  base + ${row.parts.size - 1} splits" else ""
+                            Text(
+                                text = fmtBytes(row.parts.sumOf { p -> p.size }) + extra,
+                                color = Pal.Ink2,
+                                fontSize = 12.sp
+                            )
                         }
                         if (!sending && item.uri != null) {
                             Spacer(Modifier.width(8.dp))
                             GhostButton(
                                 text = if (item.mime == APK_MIME) "Install" else "Open",
-                                onClick = { onOpen(item) }
+                                onClick = { onOpen(row.parts) }
                             )
                         }
                     }
