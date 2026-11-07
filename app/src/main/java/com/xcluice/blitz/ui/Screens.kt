@@ -138,7 +138,15 @@ private fun BigAction(title: String, sub: String, send: Boolean, delayMs: Int, o
 
 @Composable
 fun SendScreen(
-    metas: List<FileMeta>,
+    fileMetas: List<FileMeta>,
+    summary: String,
+    canSend: Boolean,
+    tab: Int,
+    onTab: (Int) -> Unit,
+    apps: List<AppEntry>,
+    appsLoading: Boolean,
+    selectedApps: Set<String>,
+    onToggleApp: (String) -> Unit,
     encrypt: Boolean,
     onEncrypt: (Boolean) -> Unit,
     onAdd: () -> Unit,
@@ -160,15 +168,28 @@ fun SendScreen(
                 .padding(vertical = 8.dp)
         )
         Text("Send", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Pal.Ink)
-        val total = metas.sumOf { it.size }
         Text(
-            text = if (metas.isEmpty()) "Choose what to send" else "${metas.size} file(s), ${fmtBytes(total)}",
+            text = summary,
             color = Pal.Ink2,
             fontSize = 14.sp,
-            modifier = Modifier.padding(top = 2.dp, bottom = 14.dp)
+            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp)
         )
+        Segmented(
+            options = listOf("Files", "Apps"),
+            selected = tab,
+            onSelect = onTab,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(12.dp))
         Glass(Modifier.fillMaxWidth().weight(1f)) {
-            if (metas.isEmpty()) {
+            if (tab == 1) {
+                AppsPane(
+                    apps = apps,
+                    loading = appsLoading,
+                    selected = selectedApps,
+                    onToggle = onToggleApp
+                )
+            } else if (fileMetas.isEmpty()) {
                 Column(
                     Modifier
                         .align(Alignment.Center)
@@ -186,15 +207,17 @@ fun SendScreen(
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize().padding(10.dp)) {
-                    items(metas) { m -> FileRow(m.name, m.size) }
+                    items(fileMetas) { m -> FileRow(m.name, m.size) }
                 }
             }
         }
         Spacer(Modifier.height(12.dp))
-        if (metas.isNotEmpty()) {
+        if (canSend || (tab == 0 && fileMetas.isNotEmpty())) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                GhostButton("Add more", Modifier.weight(1f), onClick = onAdd)
-                GhostButton("Clear", Modifier.weight(1f), onClick = onClear)
+                if (tab == 0) {
+                    GhostButton("Add more", Modifier.weight(1f), onClick = onAdd)
+                }
+                GhostButton("Clear all", Modifier.weight(1f), onClick = onClear)
             }
             Spacer(Modifier.height(10.dp))
         }
@@ -219,7 +242,7 @@ fun SendScreen(
         PrimaryButton(
             text = "Scan the receiver's code",
             modifier = Modifier.fillMaxWidth(),
-            enabled = metas.isNotEmpty(),
+            enabled = canSend,
             onClick = onScan
         )
     }
@@ -450,7 +473,10 @@ private fun DonePanel(st: UiState, sending: Boolean, onOpen: (Item) -> Unit) {
                         }
                         if (!sending && item.uri != null) {
                             Spacer(Modifier.width(8.dp))
-                            GhostButton("Open", onClick = { onOpen(item) })
+                            GhostButton(
+                                text = if (item.mime == APK_MIME) "Install" else "Open",
+                                onClick = { onOpen(item) }
+                            )
                         }
                     }
                 }

@@ -51,6 +51,9 @@ data class Item(
     val mime: String = "*/*"
 )
 
+/** Something to send: where to read it from, and what to call it on the other side. */
+class SendItem(val uri: Uri, val meta: FileMeta)
+
 data class UiState(
     val phase: Phase = Phase.IDLE,
     val role: Role? = null,
@@ -116,8 +119,8 @@ object Blitz {
         }
     }
 
-    fun startSend(uris: List<Uri>, pairing: Pairing, encrypt: Boolean) {
-        if (busy || uris.isEmpty()) return
+    fun startSend(items: List<SendItem>, pairing: Pairing, encrypt: Boolean) {
+        if (busy || items.isEmpty()) return
         val g = ++gen
         _state.value = UiState(
             phase = Phase.PREPARING,
@@ -127,7 +130,7 @@ object Blitz {
         )
         job = scope.launch {
             try {
-                sendFlow(uris, pairing, encrypt)
+                sendFlow(items, pairing, encrypt)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -320,11 +323,11 @@ object Blitz {
 
     // ---------- send ----------
 
-    private suspend fun sendFlow(uris: List<Uri>, p: Pairing, encrypt: Boolean) = coroutineScope {
+    private suspend fun sendFlow(items: List<SendItem>, p: Pairing, encrypt: Boolean) = coroutineScope {
         acquireLocks()
         KeepAliveService.start(app)
 
-        val metas = uris.map { describe(it) }
+        val metas = items.map { it.meta }
         val total = metas.sumOf { it.size }
         mutate {
             it.copy(
@@ -370,9 +373,9 @@ object Blitz {
             }
         }
         val pfds = CopyOnWriteArrayList<ParcelFileDescriptor>()
-        val files: List<Lazy<FileChannel>> = uris.map { u ->
+        val files: List<Lazy<FileChannel>> = items.map { si ->
             lazy {
-                val pfd = app.contentResolver.openFileDescriptor(u, "r")
+                val pfd = app.contentResolver.openFileDescriptor(si.uri, "r")
                     ?: throw IOException("Couldn't open a file to send")
                 pfds.add(pfd)
                 FileInputStream(pfd.fileDescriptor).channel

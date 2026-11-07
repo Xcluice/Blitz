@@ -29,6 +29,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -41,10 +42,17 @@ import com.xcluice.blitz.engine.Blitz
 import com.xcluice.blitz.engine.Item
 import com.xcluice.blitz.engine.Pairing
 import com.xcluice.blitz.engine.Phase
+import com.xcluice.blitz.engine.SendItem
+import com.xcluice.blitz.ui.AppEntry
 import com.xcluice.blitz.ui.GlassBg
 import com.xcluice.blitz.ui.HomeScreen
 import com.xcluice.blitz.ui.RunScreen
 import com.xcluice.blitz.ui.SendScreen
+import com.xcluice.blitz.ui.appSendItems
+import com.xcluice.blitz.ui.fmtBytes
+import com.xcluice.blitz.ui.loadApps
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -87,7 +95,30 @@ fun BlitzRoot() {
     var encrypt by remember { mutableStateOf(true) }
     var pending by remember { mutableStateOf<(() -> Unit)?>(null) }
 
-    val metas = remember(picked) { picked.map { Blitz.describe(it) } }
+    var tab by remember { mutableStateOf(0) }
+    var appsRequested by remember { mutableStateOf(false) }
+    var appsReady by remember { mutableStateOf(false) }
+    var selectedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val apps by produceState(initialValue = emptyList<AppEntry>(), key1 = appsRequested) {
+        if (appsRequested) {
+            value = withContext(Dispatchers.Default) { loadApps(ctx) }
+            appsReady = true
+        }
+    }
+
+    val pickedItems = remember(picked) { picked.map { SendItem(it, Blitz.describe(it)) } }
+    val appItems = remember(apps, selectedApps) {
+        apps.filter { it.pkg in selectedApps }.flatMap { appSendItems(it) }
+    }
+    val allItems = pickedItems + appItems
+    val fileMetas = pickedItems.map { it.meta }
+    val summary = run {
+        val parts = ArrayList<String>()
+        if (picked.isNotEmpty()) parts.add("${picked.size} file(s)")
+        if (selectedApps.isNotEmpty()) parts.add("${selectedApps.size} app(s)")
+        if (allItems.isEmpty()) "Choose files or apps to send"
+        else parts.joinToString(", ") + " · " + fmtBytes(allItems.sumOf { it.meta.size })
+    }
 
     SideEffect {
         view.keepScreenOn = st.phase == Phase.TRANSFERRING ||
@@ -138,7 +169,7 @@ fun BlitzRoot() {
             if (p == null) {
                 Toast.makeText(ctx, "That isn't a Blitz code", Toast.LENGTH_SHORT).show()
             } else {
-                Blitz.startSend(picked, p, encrypt)
+                Blitz.startSend(allItems, p, encrypt)
             }
         }
     }
@@ -169,11 +200,27 @@ fun BlitzRoot() {
                         onReceive = { withPerms { Blitz.startReceive() } }
                     )
                     1 -> SendScreen(
-                        metas = metas,
+                        fileMetas = fileMetas,
+                        summary = summary,
+                        canSend = allItems.isNotEmpty(),
+                        tab = tab,
+                        onTab = {
+                            tab = it
+                            if (it == 1) appsRequested = true
+                        },
+                        apps = apps,
+                        appsLoading = appsRequested && !appsReady,
+                        selectedApps = selectedApps,
+                        onToggleApp = { pkg ->
+                            selectedApps = if (pkg in selectedApps) selectedApps - pkg else selectedApps + pkg
+                        },
                         encrypt = encrypt,
                         onEncrypt = { encrypt = it },
                         onAdd = { pickLauncher.launch(arrayOf("*/*")) },
-                        onClear = { picked = emptyList() },
+                        onClear = {
+                            picked = emptyList()
+                            selectedApps = emptySet()
+                        },
                         onScan = {
                             withPerms {
                                 val o = ScanOptions()
@@ -193,6 +240,8 @@ fun BlitzRoot() {
                             Blitz.reset()
                             if (wasDone) {
                                 picked = emptyList()
+                                selectedApps = emptySet()
+                                tab = 0
                                 picking = false
                             }
                         },
