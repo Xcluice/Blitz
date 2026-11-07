@@ -151,7 +151,7 @@ object Blitz {
     }
 
     fun describe(uri: Uri): FileMeta {
-        var name = "file"
+        var name = uri.lastPathSegment?.substringAfterLast('/') ?: "file"
         var size = -1L
         try {
             app.contentResolver.query(

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -55,6 +56,7 @@ import com.xcluice.blitz.ui.loadApps
 import com.xcluice.blitz.engine.ApkInstaller
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -65,8 +67,55 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
+        if (savedInstanceState == null) handleShare(intent)
         setContent { BlitzRoot() }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShare(intent)
+    }
+
+    /** Files or apps shared to Blitz from another app's share sheet. */
+    private fun handleShare(i: Intent?) {
+        if (i == null) return
+        val uris = ArrayList<Uri>()
+        if (i.action == Intent.ACTION_SEND) {
+            val u: Uri? = if (Build.VERSION.SDK_INT >= 33) {
+                i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            }
+            if (u != null) uris.add(u)
+        } else if (i.action == Intent.ACTION_SEND_MULTIPLE) {
+            val l: ArrayList<Uri>? = if (Build.VERSION.SDK_INT >= 33) {
+                i.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                i.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+            }
+            if (l != null) uris.addAll(l)
+        } else {
+            return
+        }
+        if (uris.isEmpty()) {
+            val cd = i.clipData
+            if (cd != null) {
+                for (k in 0 until cd.itemCount) {
+                    val u = cd.getItemAt(k).uri
+                    if (u != null) uris.add(u)
+                }
+            }
+        }
+        if (uris.isNotEmpty()) Incoming.uris.value = uris
+    }
+}
+
+/** Hand-off from the activity's share intent to the Compose UI. */
+object Incoming {
+    val uris = MutableStateFlow<List<Uri>>(emptyList())
 }
 
 private val WIFI_PERM: String =
@@ -120,6 +169,16 @@ fun BlitzRoot() {
     var appsRequested by remember { mutableStateOf(false) }
     var appsReady by remember { mutableStateOf(false) }
     var selectedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val shared by Incoming.uris.collectAsState()
+    LaunchedEffect(shared) {
+        if (shared.isNotEmpty()) {
+            picked = (picked + shared).distinct()
+            tab = 0
+            picking = true
+            Incoming.uris.value = emptyList()
+        }
+    }
     val apps by produceState(initialValue = emptyList<AppEntry>(), key1 = appsRequested) {
         if (appsRequested) {
             value = withContext(Dispatchers.Default) { loadApps(ctx) }
