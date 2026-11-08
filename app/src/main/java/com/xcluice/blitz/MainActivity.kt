@@ -181,6 +181,7 @@ fun BlitzRoot() {
     var appsReady by remember { mutableStateOf(false) }
     var selectedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    var crash by remember { mutableStateOf(readCrash(ctx)) }
     var myName by remember { mutableStateOf(Store.name(ctx)) }
     var myAvatar by remember { mutableStateOf(Store.avatar(ctx)) }
     var profileSet by remember { mutableStateOf(Store.hasProfile(ctx)) }
@@ -349,6 +350,7 @@ fun BlitzRoot() {
     GlassBg(drift = st.phase != Phase.TRANSFERRING, rate = 1f) {
         Box(Modifier.fillMaxSize().systemBarsPadding()) {
             val screen = when {
+                crash != null -> 6
                 st.phase != Phase.IDLE -> 2
                 editingProfile || !profileSet -> 5
                 showHistory -> 4
@@ -378,6 +380,18 @@ fun BlitzRoot() {
                         onReceive = {
                             peer = null
                             withPerms { Blitz.startReceive() }
+                        }
+                    )
+                    6 -> com.xcluice.blitz.ui.CrashScreen(
+                        report = crash ?: "",
+                        onCopy = {
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("Blitz crash", crash ?: ""))
+                            Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+                        },
+                        onDismiss = {
+                            clearCrash(ctx)
+                            crash = null
                         }
                     )
                     5 -> ProfileScreen(

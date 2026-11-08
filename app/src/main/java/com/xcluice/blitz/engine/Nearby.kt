@@ -83,7 +83,10 @@ object Nearby {
         try {
             val srv = bm.openGattServer(ctx, object : BluetoothGattServerCallback() {
                 override fun onServiceAdded(status: Int, service: BluetoothGattService?) {
-                    startAdvertising(ad, name, avatar)
+                    try {
+                        startAdvertising(ad, name, avatar)
+                    } catch (_: Throwable) {
+                    }
                 }
 
                 override fun onCharacteristicWriteRequest(
@@ -91,6 +94,7 @@ object Nearby {
                     preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?
                 ) {
                     var ok = false
+                    try {
                     if (characteristic.uuid == REQ && value != null) {
                         val r = decodeRequest(value)
                         if (r != null) {
@@ -102,13 +106,18 @@ object Nearby {
                             ok = true
                         }
                     }
+                    } catch (_: Throwable) {
+                    }
                     if (responseNeeded) {
+                        try {
                         server?.sendResponse(
                             device, requestId,
                             if (ok) android.bluetooth.BluetoothGatt.GATT_SUCCESS
                             else android.bluetooth.BluetoothGatt.GATT_FAILURE,
                             0, null
                         )
+                        } catch (_: Throwable) {
+                        }
                     }
                 }
 
@@ -162,6 +171,14 @@ object Nearby {
     }
 
     private fun startAdvertising(ad: android.bluetooth.BluetoothAdapter, name: String, avatar: Int) {
+        try {
+            startAdvertisingUnsafe(ad, name, avatar)
+        } catch (e: Throwable) {
+            hostError.value = "Bluetooth advertising failed: ${e.javaClass.simpleName}"
+        }
+    }
+
+    private fun startAdvertisingUnsafe(ad: android.bluetooth.BluetoothAdapter, name: String, avatar: Int) {
         val adv = ad.bluetoothLeAdvertiser
         if (adv == null) {
             hostError.value = "This phone can't advertise over Bluetooth LE."
