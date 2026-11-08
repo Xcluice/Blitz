@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -42,6 +43,9 @@ import androidx.compose.ui.unit.sp
 import com.xcluice.blitz.engine.FileMeta
 import com.xcluice.blitz.engine.Item
 import com.xcluice.blitz.engine.Phase
+import com.xcluice.blitz.engine.Request
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import com.xcluice.blitz.engine.Role
 import com.xcluice.blitz.engine.UiState
 import java.util.Locale
@@ -69,16 +73,39 @@ fun fmtTime(s: Long): String = when {
 // ---------------------------------------------------------------- home
 
 @Composable
-fun HomeScreen(onSend: () -> Unit, onReceive: () -> Unit) {
+fun HomeScreen(
+    myName: String,
+    myAvatar: Int,
+    onProfile: () -> Unit,
+    onHistory: () -> Unit,
+    onSend: () -> Unit,
+    onReceive: () -> Unit
+) {
     Column(
         Modifier
             .fillMaxSize()
             .padding(horizontal = 22.dp, vertical = 14.dp)
     ) {
-        Row(Modifier.popIn(0), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().popIn(0), verticalAlignment = Alignment.CenterVertically) {
             BoltIcon(Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
             Text("Blitz", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.bounceClick(onClick = onHistory)) { Chip("History") }
+            Spacer(Modifier.width(10.dp))
+            Row(
+                Modifier
+                    .bounceClick(onClick = onProfile)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Pal.Fill)
+                    .border(1.dp, Pal.Line, RoundedCornerShape(22.dp))
+                    .padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Avatar(myAvatar, Modifier.size(30.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(myName, color = Pal.Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 90.dp))
+            }
         }
         Box(Modifier.weight(1f).fillMaxWidth().popIn(60), contentAlignment = Alignment.Center) {
             PulseRings(Modifier.size(300.dp), startFrac = 0.28f, spread = 1f)
@@ -165,6 +192,7 @@ fun SendScreen(
     onAdd: () -> Unit,
     onRemoveFile: (Int) -> Unit,
     onClear: () -> Unit,
+    onFind: () -> Unit,
     onScan: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -268,10 +296,19 @@ fun SendScreen(
         }
         Spacer(Modifier.height(12.dp))
         PrimaryButton(
-            text = "Scan the receiver's code",
+            text = "Find nearby phone",
             modifier = Modifier.fillMaxWidth(),
             enabled = canSend,
-            onClick = onScan
+            onClick = onFind
+        )
+        Text(
+            text = "or scan a QR code",
+            color = Pal.Ink3,
+            fontSize = 13.sp,
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
+                .bounceClick(enabled = canSend, onClick = onScan)
+                .padding(top = 10.dp, bottom = 2.dp)
         )
     }
 }
@@ -306,7 +343,17 @@ private fun tick(view: android.view.View, strong: Boolean) {
 }
 
 @Composable
-fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
+fun RunScreen(
+    st: UiState,
+    myName: String,
+    myAvatar: Int,
+    request: Request?,
+    hostError: String?,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+    onCancel: () -> Unit,
+    onOpen: (List<Item>) -> Unit
+) {
     val sending = st.role == Role.SEND
     val view = LocalView.current
     LaunchedEffect(st.phase) {
@@ -343,10 +390,7 @@ fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
                         active = false, flow = 0f, youAreSender = sending
                     )
                 }
-                Phase.WAITING -> {
-                    val qr = st.qr
-                    if (qr != null) QrCard(qr)
-                }
+                Phase.WAITING -> WaitingPanel(st.qr, myName, myAvatar, request, hostError, onAccept, onDecline)
                 Phase.TRANSFERRING -> TransferPanel(st, sending)
                 Phase.DONE -> DonePanel(st, sending, onOpen)
                 Phase.ERROR -> {
@@ -372,6 +416,86 @@ fun RunScreen(st: UiState, onCancel: () -> Unit, onOpen: (List<Item>) -> Unit) {
                 onClick = onCancel
             )
             else -> GhostButton("Cancel", Modifier.fillMaxWidth(), onClick = onCancel)
+        }
+    }
+}
+
+@Composable
+private fun WaitingPanel(
+    qr: String?,
+    myName: String,
+    myAvatar: Int,
+    request: Request?,
+    hostError: String?,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    var showQr by remember { mutableStateOf(false) }
+    val view = LocalView.current
+    LaunchedEffect(request) {
+        if (request != null) tick(view, false)
+    }
+    Box(Modifier.fillMaxSize()) {
+        if (request != null) {
+            Glass(Modifier.align(Alignment.Center).fillMaxWidth().popIn(0), radius = 30.dp, strong = true) {
+                Column(
+                    Modifier.padding(24.dp).fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Avatar(request.avatar, Modifier.size(88.dp))
+                    Spacer(Modifier.height(14.dp))
+                    Text(request.name, color = Pal.Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    val what = if (request.count == 1 && request.first.isNotEmpty()) request.first
+                    else "${request.count} files"
+                    Text(
+                        text = "wants to send you $what",
+                        color = Pal.Ink2,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    Text(fmtBytes(request.total), color = Pal.Ink3, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        GhostButton("Decline", Modifier.weight(1f), onClick = onDecline)
+                        PrimaryButton("Accept", Modifier.weight(1f), onClick = onAccept)
+                    }
+                }
+            }
+        } else if (showQr && qr != null) {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                QrCard(qr)
+                Text(
+                    text = "Back to nearby",
+                    color = Pal.Ink2,
+                    fontSize = 14.sp,
+                    modifier = Modifier.bounceClick { showQr = false }.padding(12.dp)
+                )
+            }
+        } else {
+            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center) {
+                    PulseRings(Modifier.size(320.dp), startFrac = 0.3f, spread = 1f)
+                    Avatar(myAvatar, Modifier.size(112.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("Visible as $myName", color = Pal.Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    text = hostError ?: "Open Blitz on the other phone, tap Send and pick you.",
+                    color = Pal.Ink2,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 6.dp, start = 16.dp, end = 16.dp)
+                )
+                if (qr != null) {
+                    Text(
+                        text = "Show a QR code instead",
+                        color = Pal.Ink3,
+                        fontSize = 13.sp,
+                        modifier = Modifier.bounceClick { showQr = true }.padding(16.dp)
+                    )
+                }
+            }
         }
     }
 }

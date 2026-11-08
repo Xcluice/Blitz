@@ -44,7 +44,15 @@ import com.xcluice.blitz.engine.Blitz
 import com.xcluice.blitz.engine.Item
 import com.xcluice.blitz.engine.Pairing
 import com.xcluice.blitz.engine.Phase
+import com.xcluice.blitz.engine.Role
+import kotlinx.coroutines.delay
 import com.xcluice.blitz.engine.SendItem
+import com.xcluice.blitz.engine.Nearby
+import com.xcluice.blitz.engine.Peer
+import com.xcluice.blitz.ui.DiscoverScreen
+import com.xcluice.blitz.ui.HistoryScreen
+import com.xcluice.blitz.ui.ProfileScreen
+import androidx.compose.runtime.DisposableEffect
 import com.xcluice.blitz.ui.AppEntry
 import com.xcluice.blitz.ui.GlassBg
 import com.xcluice.blitz.ui.LocalTilt
@@ -173,6 +181,24 @@ fun BlitzRoot() {
     var appsReady by remember { mutableStateOf(false) }
     var selectedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    var myName by remember { mutableStateOf(Store.name(ctx)) }
+    var myAvatar by remember { mutableStateOf(Store.avatar(ctx)) }
+    var profileSet by remember { mutableStateOf(Store.hasProfile(ctx)) }
+    var editingProfile by remember { mutableStateOf(false) }
+    var draftName by remember { mutableStateOf(myName) }
+    var draftAvatar by remember { mutableStateOf(myAvatar) }
+    var showHistory by remember { mutableStateOf(false) }
+    var history by remember { mutableStateOf(Store.history(ctx)) }
+    var discovering by remember { mutableStateOf(false) }
+    var asking by remember { mutableStateOf<Peer?>(null) }
+    var discoverMsg by remember { mutableStateOf<String?>(null) }
+    var peer by remember { mutableStateOf<Pair<String, Int>?>(null) }
+
+    val nearby by Nearby.peers.collectAsState()
+    val request by Nearby.incoming.collectAsState()
+    val hostError by Nearby.hostError.collectAsState()
+    val scanError by Nearby.scanError.collectAsState()
+
     val shared by Incoming.uris.collectAsState()
     LaunchedEffect(shared) {
         if (shared.isNotEmpty()) {
@@ -209,6 +235,50 @@ fun BlitzRoot() {
             st.phase == Phase.WAITING
     }
 
+    // Receiver: be visible over Bluetooth while waiting for a sender.
+    val hostKey = if (st.phase == Phase.WAITING) st.qr else null
+    DisposableEffect(hostKey) {
+        if (hostKey != null) Nearby.host(ctx, myName, myAvatar, hostKey)
+        onDispose { Nearby.stopHost() }
+    }
+    LaunchedEffect(request) {
+        val r = request
+        if (r != null) {
+            peer = Pair(r.name, r.avatar)
+            delay(25_000)
+            if (Nearby.incoming.value === r) Nearby.decide(false)
+        }
+    }
+
+    // Sender: scan while the Nearby screen is open.
+    DisposableEffect(discovering) {
+        if (discovering) Nearby.startScan(ctx)
+        onDispose { Nearby.stopScan() }
+    }
+    LaunchedEffect(discovering) {
+        while (discovering) {
+            Nearby.prune(8_000)
+            delay(2_000)
+        }
+    }
+
+    // History: record each finished transfer once.
+    LaunchedEffect(st.phase) {
+        if (st.phase == Phase.DONE && st.total > 0) {
+            val secs = (st.elapsedMs / 1000.0).coerceAtLeast(0.001)
+            val p = peer
+            Store.addHistory(
+                ctx,
+                HistoryRec(
+                    System.currentTimeMillis(), st.role == Role.SEND, p?.first ?: "Unknown phone",
+                    p?.second ?: 0, st.items.size, st.total, st.total / secs,
+                    st.items.firstOrNull()?.name ?: ""
+                )
+            )
+            history = Store.history(ctx)
+        }
+    }
+
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -228,6 +298,15 @@ fun BlitzRoot() {
     fun withPerms(action: () -> Unit) {
         val need = ArrayList<String>()
         if (!hasPerm(ctx, WIFI_PERM)) need.add(WIFI_PERM)
+        if (Build.VERSION.SDK_INT >= 31) {
+            for (bp in arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
+                Manifest.permission.BLUETOOTH_CONNECT
+            )) {
+                if (!hasPerm(ctx, bp)) need.add(bp)
+            }
+        }
         if (Build.VERSION.SDK_INT >= 33 && !hasPerm(ctx, Manifest.permission.POST_NOTIFICATIONS)) {
             need.add(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -260,7 +339,10 @@ fun BlitzRoot() {
     BackHandler(enabled = st.phase != Phase.IDLE && st.phase != Phase.TRANSFERRING) {
         Blitz.reset()
     }
-    BackHandler(enabled = st.phase == Phase.IDLE && picking) { picking = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && picking && !discovering && !showHistory && !editingProfile) { picking = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && discovering && asking == null) { discovering = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && showHistory) { showHistory = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && editingProfile && profileSet) { editingProfile = false }
 
     val tilt = rememberTilt(st.phase == Phase.IDLE || st.phase == Phase.WAITING)
     CompositionLocalProvider(LocalTilt provides tilt) {
@@ -268,6 +350,9 @@ fun BlitzRoot() {
         Box(Modifier.fillMaxSize().systemBarsPadding()) {
             val screen = when {
                 st.phase != Phase.IDLE -> 2
+                editingProfile || !profileSet -> 5
+                showHistory -> 4
+                discovering -> 3
                 picking -> 1
                 else -> 0
             }
@@ -281,8 +366,86 @@ fun BlitzRoot() {
             ) { s ->
                 when (s) {
                     0 -> HomeScreen(
+                        myName = myName,
+                        myAvatar = myAvatar,
+                        onProfile = {
+                            draftName = myName
+                            draftAvatar = myAvatar
+                            editingProfile = true
+                        },
+                        onHistory = { showHistory = true },
                         onSend = { picking = true },
-                        onReceive = { withPerms { Blitz.startReceive() } }
+                        onReceive = {
+                            peer = null
+                            withPerms { Blitz.startReceive() }
+                        }
+                    )
+                    5 -> ProfileScreen(
+                        name = if (profileSet || editingProfile) draftName else draftName,
+                        avatar = draftAvatar,
+                        canBack = profileSet,
+                        onName = { draftName = it },
+                        onAvatar = { draftAvatar = it },
+                        onSave = {
+                            Store.saveProfile(ctx, draftName, draftAvatar)
+                            myName = draftName.trim().take(14)
+                            myAvatar = draftAvatar
+                            profileSet = true
+                            editingProfile = false
+                        },
+                        onBack = { editingProfile = false }
+                    )
+                    4 -> HistoryScreen(
+                        records = history,
+                        onClear = {
+                            Store.clearHistory(ctx)
+                            history = emptyList()
+                        },
+                        onBack = { showHistory = false }
+                    )
+                    3 -> DiscoverScreen(
+                        myAvatar = myAvatar,
+                        peers = nearby,
+                        asking = asking,
+                        message = discoverMsg ?: scanError,
+                        onPick = { p ->
+                            if (asking == null) {
+                                asking = p
+                                discoverMsg = null
+                                scope.launch {
+                                    Nearby.stopScan()
+                                    val first = pickedItems.firstOrNull()?.meta?.name
+                                        ?: appItems.firstOrNull()?.meta?.name ?: ""
+                                    val res = Nearby.requestPairing(
+                                        ctx, p, myName, myAvatar, allItems.size,
+                                        allItems.sumOf { it.meta.size }, first
+                                    )
+                                    asking = null
+                                    val pairing = if (res != null) Pairing.parse(res) else null
+                                    if (pairing != null) {
+                                        peer = Pair(p.name, p.avatar)
+                                        discovering = false
+                                        Blitz.startSend(allItems, pairing, encrypt)
+                                    } else {
+                                        discoverMsg = if (res == "N") "${p.name} declined."
+                                        else "Couldn't reach ${p.name}. Try again."
+                                        Nearby.startScan(ctx)
+                                    }
+                                }
+                            }
+                        },
+                        onScan = {
+                            discovering = false
+                            withPerms {
+                                val o = ScanOptions()
+                                o.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                o.setPrompt("Scan the code on the receiving phone")
+                                o.setBeepEnabled(false)
+                                o.setOrientationLocked(false)
+                                scanLauncher.launch(o)
+                            }
+                        },
+                        onBack = { discovering = false }
                     )
                     1 -> SendScreen(
                         fileMetas = fileMetas,
@@ -307,6 +470,12 @@ fun BlitzRoot() {
                             picked = emptyList()
                             selectedApps = emptySet()
                         },
+                        onFind = {
+                            withPerms {
+                                discoverMsg = null
+                                discovering = true
+                            }
+                        },
                         onScan = {
                             withPerms {
                                 val o = ScanOptions()
@@ -321,6 +490,12 @@ fun BlitzRoot() {
                     )
                     else -> RunScreen(
                         st = st,
+                        myName = myName,
+                        myAvatar = myAvatar,
+                        request = request,
+                        hostError = hostError,
+                        onAccept = { Nearby.decide(true) },
+                        onDecline = { Nearby.decide(false) },
                         onCancel = {
                             val wasDone = st.phase == Phase.DONE
                             Blitz.reset()
