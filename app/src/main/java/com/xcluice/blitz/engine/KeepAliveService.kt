@@ -8,7 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -47,12 +49,24 @@ class KeepAliveService : Service() {
                 .setContentIntent(open)
                 .build()
             ServiceCompat.startForeground(this, 1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            up = true
         } catch (_: Throwable) {
+            // Still promote the service (no type) so Android doesn't kill the app, then let stop() end it.
             try {
-                stopSelf()
+                val n2 = NotificationCompat.Builder(this, "blitz")
+                    .setSmallIcon(R.drawable.ic_stat_bolt)
+                    .setContentTitle("Xcluice Blitz")
+                    .build()
+                startForeground(1, n2)
+                up = true
             } catch (_: Throwable) {
             }
         }
+    }
+
+    override fun onDestroy() {
+        up = false
+        super.onDestroy()
     }
 
     companion object {
@@ -63,7 +77,15 @@ class KeepAliveService : Service() {
             }
         }
 
-        fun stop(c: Context) {
+        @Volatile
+        var up = false
+
+        /** Stopping before the service has gone foreground crashes the app, so wait for it. */
+        fun stop(c: Context, tries: Int = 0) {
+            if (!up && tries < 12) {
+                Handler(Looper.getMainLooper()).postDelayed({ stop(c, tries + 1) }, 500)
+                return
+            }
             try {
                 c.stopService(Intent(c, KeepAliveService::class.java))
             } catch (_: Throwable) {
