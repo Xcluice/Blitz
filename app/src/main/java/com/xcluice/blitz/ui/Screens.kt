@@ -76,6 +76,9 @@ fun fmtTime(s: Long): String = when {
 fun HomeScreen(
     myName: String,
     myAvatar: Int,
+    updateText: String?,
+    updateBusy: Boolean,
+    onUpdate: () -> Unit,
     onProfile: () -> Unit,
     onHistory: () -> Unit,
     onSend: () -> Unit,
@@ -105,6 +108,18 @@ fun HomeScreen(
                 Avatar(myAvatar, Modifier.size(30.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(myName, color = Pal.Ink, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 90.dp))
+            }
+        }
+        if (updateText != null) {
+            Glass(Modifier.fillMaxWidth().padding(top = 12.dp).popIn(30), radius = 22.dp, strong = true) {
+                Row(
+                    Modifier.padding(start = 18.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(updateText, color = Pal.Ink, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    if (updateBusy) Spinner(Modifier.size(28.dp).padding(end = 8.dp))
+                    else PrimaryButton("Update", onClick = onUpdate)
+                }
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth().popIn(60), contentAlignment = Alignment.Center) {

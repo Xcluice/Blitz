@@ -27,7 +27,7 @@ jobs:
         run: base64 -d app/blitz.jks.b64 > app/blitz.jks
 
       - name: Build release APK
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        run: gradle :app:assembleRelease --no-daemon --stacktrace -PappCode=${{ github.run_number }} -PappVersion=0.1.${{ github.run_number }}
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk XcluiceBlitz-release.apk

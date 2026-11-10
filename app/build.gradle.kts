@@ -12,8 +12,8 @@ android {
         applicationId = "com.xcluice.blitz"
         minSdk = 29
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (project.findProperty("appCode") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("appVersion") as String?) ?: "0.1.0"
     }
 
     signingConfigs {

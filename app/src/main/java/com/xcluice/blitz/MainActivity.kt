@@ -181,6 +181,12 @@ fun BlitzRoot() {
     var appsReady by remember { mutableStateOf(false) }
     var selectedApps by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    var update by remember { mutableStateOf<com.xcluice.blitz.engine.UpdateInfo?>(null) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updatePct by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        update = withContext(Dispatchers.IO) { com.xcluice.blitz.engine.Updater.check(ctx) }
+    }
     var crash by remember { mutableStateOf(readCrash(ctx)) }
     var myName by remember { mutableStateOf(Store.name(ctx)) }
     var myAvatar by remember { mutableStateOf(Store.avatar(ctx)) }
@@ -368,6 +374,29 @@ fun BlitzRoot() {
             ) { s ->
                 when (s) {
                     0 -> HomeScreen(
+                        updateText = update?.let {
+                            if (updateBusy) "Downloading ${it.version}… $updatePct%" else "Update available: ${it.version}"
+                        },
+                        updateBusy = updateBusy,
+                        onUpdate = {
+                            val info = update
+                            if (info != null && !updateBusy) {
+                                updateBusy = true
+                                updatePct = 0
+                                scope.launch {
+                                    val f = withContext(Dispatchers.IO) {
+                                        com.xcluice.blitz.engine.Updater.download(ctx, info) { updatePct = (it * 100).toInt() }
+                                    }
+                                    updateBusy = false
+                                    if (f == null) {
+                                        Toast.makeText(ctx, "Download failed. Check your internet.", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        val err = com.xcluice.blitz.engine.Updater.install(ctx, f)
+                                        if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        },
                         myName = myName,
                         myAvatar = myAvatar,
                         onProfile = {
