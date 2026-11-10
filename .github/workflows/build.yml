@@ -32,6 +32,22 @@ jobs:
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk XcluiceBlitz-release.apk
 
+      - name: Build delta patches from recent releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pip install bsdiff4
+          mkdir -p old dist
+          args=""
+          for tag in $(gh release list --limit 6 --json tagName --jq '.[].tagName'); do
+            code=${tag##*.}
+            if [ "$code" = "${{ github.run_number }}" ]; then continue; fi
+            if gh release download "$tag" -p XcluiceBlitz-release.apk -O "old/$code.apk"; then
+              args="$args $code:old/$code.apk"
+            fi
+          done
+          python3 scripts/make_patches.py XcluiceBlitz-release.apk ${{ github.run_number }} dist $args
+
       - uses: actions/upload-artifact@v4
         with:
           name: XcluiceBlitz-release-apk
@@ -42,4 +58,6 @@ jobs:
         with:
           tag_name: v0.1.${{ github.run_number }}
           name: Xcluice Blitz v0.1.${{ github.run_number }}
-          files: XcluiceBlitz-release.apk
+          files: |
+            XcluiceBlitz-release.apk
+            dist/*

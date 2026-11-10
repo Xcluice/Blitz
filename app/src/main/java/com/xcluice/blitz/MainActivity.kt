@@ -375,7 +375,9 @@ fun BlitzRoot() {
                 when (s) {
                     0 -> HomeScreen(
                         updateText = update?.let {
-                            if (updateBusy) "Downloading ${it.version}… $updatePct%" else "Update available: ${it.version}"
+                            if (updateBusy) "Downloading ${it.version}… $updatePct%"
+                            else if (it.patchUrl != null) "Update ${it.version} · small download (${fmtBytes(it.patchSize)})"
+                            else "Update available: ${it.version}"
                         },
                         updateBusy = updateBusy,
                         onUpdate = {
@@ -384,9 +386,10 @@ fun BlitzRoot() {
                                 updateBusy = true
                                 updatePct = 0
                                 scope.launch {
-                                    val f = withContext(Dispatchers.IO) {
+                                    val dl = withContext(Dispatchers.IO) {
                                         com.xcluice.blitz.engine.Updater.download(ctx, info) { updatePct = (it * 100).toInt() }
                                     }
+                                    val f = dl?.file
                                     updateBusy = false
                                     if (f == null) {
                                         Toast.makeText(ctx, "Download failed. Check your internet.", Toast.LENGTH_LONG).show()

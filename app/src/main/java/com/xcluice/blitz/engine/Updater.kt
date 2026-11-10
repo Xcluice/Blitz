@@ -10,7 +10,19 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-class UpdateInfo(val version: String, val code: Int, val url: String, val notes: String)
+class UpdateInfo(
+    val version: String,
+    val code: Int,
+    val url: String,
+    val notes: String,
+    val fullSize: Long,
+    val newSha: String?,
+    val patchUrl: String?,
+    val patchFromSha: String?,
+    val patchSize: Long
+)
+
+class Downloaded(val file: File, val delta: Boolean)
 
 /** Checks the project's latest GitHub release and installs it over the current app (same signing key). */
 object Updater {
@@ -45,29 +57,115 @@ object Updater {
             if (code <= currentCode(ctx)) return null
             val assets = o.getJSONArray("assets")
             var url: String? = null
+            var fullSize = 0L
+            val urls = HashMap<String, String>()
             for (i in 0 until assets.length()) {
                 val a = assets.getJSONObject(i)
-                if (a.getString("name").endsWith(".apk")) url = a.getString("browser_download_url")
+                val name = a.getString("name")
+                urls[name] = a.getString("browser_download_url")
+                if (name.endsWith(".apk")) {
+                    url = a.getString("browser_download_url")
+                    fullSize = a.optLong("size", 0L)
+                }
             }
             if (url == null) return null
-            UpdateInfo(tag, code, url, o.optString("body", ""))
+            var newSha: String? = null
+            var patchUrl: String? = null
+            var patchFromSha: String? = null
+            var patchSize = 0L
+            val metaUrl = urls["update.json"]
+            if (metaUrl != null) {
+                try {
+                    val m = JSONObject(httpText(metaUrl))
+                    newSha = m.optString("sha256", "").ifEmpty { null }
+                    val ps = m.optJSONArray("patches")
+                    val have = currentCode(ctx)
+                    if (ps != null) {
+                        for (i in 0 until ps.length()) {
+                            val pj = ps.getJSONObject(i)
+                            if (pj.getInt("from") == have) {
+                                patchUrl = urls[pj.getString("file")]
+                                patchFromSha = pj.getString("fromSha")
+                                patchSize = pj.optLong("size", 0L)
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+            UpdateInfo(tag, code, url, o.optString("body", ""), fullSize, newSha, patchUrl, patchFromSha, patchSize)
         } catch (_: Throwable) {
             null
         }
     }
 
-    /** Downloads the APK; [progress] gets 0..1. Returns the file or null. */
-    fun download(ctx: Context, info: UpdateInfo, progress: (Float) -> Unit): File? {
+    private fun httpText(url: String): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 8000
+        c.readTimeout = 8000
+        c.setRequestProperty("User-Agent", "XcluiceBlitz")
+        return c.inputStream.bufferedReader().use { it.readText() }
+    }
+
+    private fun sha256(f: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { ins ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /** Small download: only the changed bytes, applied to the installed APK. Null if anything doesn't check out. */
+    private fun downloadDelta(ctx: Context, info: UpdateInfo, dir: File, progress: (Float) -> Unit): File? {
+        val pu = info.patchUrl ?: return null
+        val fromSha = info.patchFromSha ?: return null
+        val newSha = info.newSha ?: return null
         return try {
-            val dir = File(ctx.cacheDir, "updates")
-            dir.mkdirs()
-            dir.listFiles()?.forEach { it.delete() }
+            val installed = File(ctx.applicationInfo.sourceDir)
+            if (sha256(installed) != fromSha) return null
+            val patch = File(dir, "patch.bin")
+            if (!fetch(pu, patch, progress)) return null
             val out = File(dir, "blitz-${info.code}.apk")
-            val c = URL(info.url).openConnection() as HttpURLConnection
+            BsPatch.apply(installed, patch, out)
+            patch.delete()
+            if (sha256(out) == newSha) out else {
+                out.delete()
+                null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /** Downloads the update, trying the small delta first and falling back to the full APK. */
+    fun download(ctx: Context, info: UpdateInfo, progress: (Float) -> Unit): Downloaded? {
+        val dir = File(ctx.cacheDir, "updates")
+        dir.mkdirs()
+        dir.listFiles()?.forEach { it.delete() }
+        val d = downloadDelta(ctx, info, dir, progress)
+        if (d != null) return Downloaded(d, true)
+        val out = File(dir, "blitz-${info.code}.apk")
+        if (!fetch(info.url, out, progress)) return null
+        val want = info.newSha
+        if (want != null && sha256(out) != want) {
+            out.delete()
+            return null
+        }
+        return Downloaded(out, false)
+    }
+
+    private fun fetch(url: String, out: File, progress: (Float) -> Unit): Boolean {
+        return try {
+            val c = URL(url).openConnection() as HttpURLConnection
             c.connectTimeout = 10000
             c.readTimeout = 15000
             c.setRequestProperty("User-Agent", "XcluiceBlitz")
-            if (c.responseCode != 200) return null
+            if (c.responseCode != 200) return false
             val total = c.contentLengthLong
             var got = 0L
             c.inputStream.use { ins ->
@@ -82,9 +180,9 @@ object Updater {
                     }
                 }
             }
-            if (total > 0 && got != total) null else out
+            !(total > 0 && got != total)
         } catch (_: Throwable) {
-            null
+            false
         }
     }
 
