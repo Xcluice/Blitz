@@ -1,0 +1,9 @@
+{
+  "name": "blitz-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Streaming pipe relay for Xcluice Blitz internet transfers. Stores nothing.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
