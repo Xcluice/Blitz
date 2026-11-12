@@ -19,6 +19,10 @@ class BlitzApp : Application() {
             }
             prev?.uncaughtException(t, e)
         }
+        try {
+            File(cacheDir, "apks").deleteRecursively()
+        } catch (_: Throwable) {
+        }
         Blitz.init(this)
     }
 }

@@ -106,16 +106,32 @@ fun loadApps(ctx: Context): List<AppEntry> {
     return out.sortedBy { it.label.lowercase() }
 }
 
-/** An app becomes one APK file, or base + split APKs when the app is split. */
+private fun cleanName(app: AppEntry): String =
+    app.label.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { app.pkg }
+
+fun isBundle(name: String): Boolean = name.endsWith(".apks", ignoreCase = true)
+
+/** A single-APK app is sent as "Label.apk" straight from disk. Split apps use [buildBundle] instead. */
 fun appSendItems(app: AppEntry): List<SendItem> {
-    val clean = app.label.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifEmpty { app.pkg }
-    val out = ArrayList<SendItem>()
-    for (i in app.paths.indices) {
-        val f = File(app.paths[i])
-        val name = if (i == 0) "$clean.apk" else "$clean.split$i.apk"
-        out.add(SendItem(Uri.fromFile(f), FileMeta(name, f.length(), APK_MIME)))
+    if (app.paths.size != 1) return emptyList()
+    val f = File(app.paths[0])
+    return listOf(SendItem(Uri.fromFile(f), FileMeta(cleanName(app) + ".apk", f.length(), APK_MIME)))
+}
+
+/** Packs base + split APKs into one compressed "Label.apks" file (a zip) and returns it as a send item. */
+fun buildBundle(ctx: Context, app: AppEntry): SendItem {
+    val dir = File(ctx.cacheDir, "apks")
+    dir.mkdirs()
+    val out = File(dir, app.pkg + ".apks")
+    java.util.zip.ZipOutputStream(out.outputStream().buffered(1 shl 16)).use { zip ->
+        zip.setLevel(java.util.zip.Deflater.BEST_SPEED)
+        for (i in app.paths.indices) {
+            zip.putNextEntry(java.util.zip.ZipEntry(if (i == 0) "base.apk" else "split$i.apk"))
+            File(app.paths[i]).inputStream().use { it.copyTo(zip, 1 shl 16) }
+            zip.closeEntry()
+        }
     }
-    return out
+    return SendItem(Uri.fromFile(out), FileMeta(cleanName(app) + ".apks", out.length(), "application/octet-stream"))
 }
 
 /** One line in the received list. [parts] is the base APK first, then its splits (or just the file itself). */

@@ -13,6 +13,55 @@ import java.io.IOException
 object ApkInstaller {
     private const val ACTION = "com.xcluice.blitz.INSTALL_RESULT"
 
+    /** Installs a Label.apks bundle (a zip holding base.apk and split APKs). */
+    fun installBundle(ctx: Context, bundle: Item): String? {
+        return try {
+            val uri = bundle.uri ?: throw IOException("${bundle.name} is missing")
+            val pi = ctx.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            val id = pi.createSession(params)
+            val session = pi.openSession(id)
+            try {
+                var n = 0
+                val raw = ctx.contentResolver.openInputStream(uri) ?: throw IOException("Can't read ${bundle.name}")
+                java.util.zip.ZipInputStream(raw.buffered(1 shl 16)).use { zin ->
+                    while (true) {
+                        val e = zin.nextEntry ?: break
+                        if (e.isDirectory || !e.name.endsWith(".apk", ignoreCase = true)) continue
+                        session.openWrite("part${n++}.apk", 0, -1).use { out ->
+                            zin.copyTo(out, 1 shl 20)
+                            session.fsync(out)
+                        }
+                    }
+                }
+                if (n == 0) throw IOException("No APKs inside ${bundle.name}")
+                commit(ctx, session, id)
+            } catch (e: Throwable) {
+                try {
+                    session.abandon()
+                } catch (_: Throwable) {
+                }
+                throw e
+            } finally {
+                try {
+                    session.close()
+                } catch (_: Throwable) {
+                }
+            }
+            null
+        } catch (e: Exception) {
+            e.message ?: "Install failed"
+        }
+    }
+
+    private fun commit(ctx: Context, session: PackageInstaller.Session, id: Int) {
+        val intent = Intent(ctx, InstallReceiver::class.java).setAction(ACTION)
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        if (Build.VERSION.SDK_INT >= 31) flags = flags or PendingIntent.FLAG_MUTABLE
+        val pending = PendingIntent.getBroadcast(ctx, id, intent, flags)
+        session.commit(pending.intentSender)
+    }
+
     /** Returns an error message, or null when the system install prompt has been handed off. */
     fun install(ctx: Context, parts: List<Item>): String? {
         return try {

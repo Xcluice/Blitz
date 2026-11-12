@@ -713,7 +713,7 @@ private fun DonePanel(st: UiState, sending: Boolean, onOpen: (List<Item>) -> Uni
                             if (!sending && item.uri != null) {
                                 Spacer(Modifier.width(8.dp))
                                 GhostButton(
-                                    text = if (item.mime == APK_MIME) "Install" else "Open",
+                                    text = if (item.mime == APK_MIME || isBundle(item.name)) "Install" else "Open",
                                     onClick = { onOpen(row.parts) }
                                 )
                             }

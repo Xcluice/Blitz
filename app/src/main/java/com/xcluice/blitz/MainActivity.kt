@@ -54,6 +54,8 @@ import com.xcluice.blitz.ui.HistoryScreen
 import com.xcluice.blitz.ui.ProfileScreen
 import androidx.compose.runtime.DisposableEffect
 import com.xcluice.blitz.ui.AppEntry
+import com.xcluice.blitz.ui.buildBundle
+import com.xcluice.blitz.ui.isBundle
 import com.xcluice.blitz.ui.GlassBg
 import com.xcluice.blitz.ui.LocalTilt
 import com.xcluice.blitz.ui.rememberTilt
@@ -150,6 +152,17 @@ private fun openItem(ctx: Context, item: Item) {
 
 /** One file opens normally; several parts (a split app) go through the package installer together. */
 private fun openItems(ctx: Context, scope: CoroutineScope, parts: List<Item>) {
+    if (parts.size == 1 && isBundle(parts[0].name)) {
+        scope.launch(Dispatchers.IO) {
+            val err = ApkInstaller.installBundle(ctx, parts[0])
+            if (err != null) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        return
+    }
     if (parts.size == 1) {
         openItem(ctx, parts[0])
         return
@@ -223,8 +236,26 @@ fun BlitzRoot() {
     }
 
     val pickedItems = remember(picked) { picked.map { SendItem(it, Blitz.describe(it)) } }
-    val appItems = remember(apps, selectedApps) {
-        apps.filter { it.pkg in selectedApps }.flatMap { appSendItems(it) }
+    var bundles by remember { mutableStateOf<Map<String, SendItem>>(emptyMap()) }
+    LaunchedEffect(apps, selectedApps) {
+        for (a in apps) {
+            if (a.pkg in selectedApps && a.paths.size > 1 && a.pkg !in bundles) {
+                val b = withContext(Dispatchers.IO) {
+                    try {
+                        buildBundle(ctx, a)
+                    } catch (_: Throwable) {
+                        null
+                    }
+                }
+                if (b != null) bundles = bundles + (a.pkg to b)
+            }
+        }
+    }
+    val bundling = apps.any { it.pkg in selectedApps && it.paths.size > 1 && it.pkg !in bundles }
+    val appItems = remember(apps, selectedApps, bundles) {
+        apps.filter { it.pkg in selectedApps }.flatMap { a ->
+            if (a.paths.size > 1) listOfNotNull(bundles[a.pkg]) else appSendItems(a)
+        }
     }
     val allItems = pickedItems + appItems
     val fileMetas = pickedItems.map { it.meta }
@@ -232,7 +263,8 @@ fun BlitzRoot() {
         val parts = ArrayList<String>()
         if (picked.isNotEmpty()) parts.add("${picked.size} file(s)")
         if (selectedApps.isNotEmpty()) parts.add("${selectedApps.size} app(s)")
-        if (allItems.isEmpty()) "Choose files or apps to send"
+        if (bundling) "Packing apps…"
+        else if (allItems.isEmpty()) "Choose files or apps to send"
         else parts.joinToString(", ") + " · " + fmtBytes(allItems.sumOf { it.meta.size })
     }
 
@@ -496,7 +528,7 @@ fun BlitzRoot() {
                     1 -> SendScreen(
                         fileMetas = fileMetas,
                         summary = summary,
-                        canSend = allItems.isNotEmpty(),
+                        canSend = allItems.isNotEmpty() && !bundling,
                         tab = tab,
                         onTab = {
                             tab = it
