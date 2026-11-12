@@ -7,6 +7,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.background
@@ -81,6 +82,7 @@ fun HomeScreen(
     onUpdate: () -> Unit,
     onProfile: () -> Unit,
     onHistory: () -> Unit,
+    onInternet: () -> Unit,
     onSend: () -> Unit,
     onReceive: () -> Unit
 ) {
@@ -149,7 +151,22 @@ fun HomeScreen(
             HomeButton("Send", true, Modifier.weight(1f), onSend)
             HomeButton("Receive", false, Modifier.weight(1f), onReceive)
         }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
+        Glass(Modifier.fillMaxWidth().popIn(230).bounceClick(onClick = onInternet), radius = 24.dp) {
+            Row(
+                Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                GlobeIcon(Modifier.size(28.dp))
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Over the internet", color = Pal.Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Send anywhere with a code. Encrypted.", color = Pal.Ink2, fontSize = 13.sp)
+                }
+                ArrowIcon(up = true, modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = 90f })
+            }
+        }
+        Spacer(Modifier.height(14.dp))
         Row(Modifier.popIn(260), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Chip("5 GHz")
             Chip("4 streams")
@@ -207,6 +224,7 @@ fun SendScreen(
     onAdd: () -> Unit,
     onRemoveFile: (Int) -> Unit,
     onClear: () -> Unit,
+    netMode: Boolean,
     onFind: () -> Unit,
     onScan: () -> Unit,
     onBack: () -> Unit
@@ -292,7 +310,7 @@ fun SendScreen(
             }
             Spacer(Modifier.height(10.dp))
         }
-        Glass(Modifier.fillMaxWidth(), radius = 22.dp) {
+        if (!netMode) Glass(Modifier.fillMaxWidth(), radius = 22.dp) {
             Row(
                 Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -311,12 +329,12 @@ fun SendScreen(
         }
         Spacer(Modifier.height(12.dp))
         PrimaryButton(
-            text = "Find nearby phone",
+            text = if (netMode) "Create share code" else "Find nearby phone",
             modifier = Modifier.fillMaxWidth(),
             enabled = canSend,
             onClick = onFind
         )
-        Text(
+        if (!netMode) Text(
             text = "or scan a QR code",
             color = Pal.Ink3,
             fontSize = 13.sp,
@@ -405,7 +423,7 @@ fun RunScreen(
                         active = false, flow = 0f, youAreSender = sending
                     )
                 }
-                Phase.WAITING -> WaitingPanel(st.qr, myName, myAvatar, request, hostError, onAccept, onDecline)
+                Phase.WAITING -> if (st.code != null) CodePanel(st.code) else WaitingPanel(st.qr, myName, myAvatar, request, hostError, onAccept, onDecline)
                 Phase.TRANSFERRING -> TransferPanel(st, sending)
                 Phase.DONE -> DonePanel(st, sending, onOpen)
                 Phase.ERROR -> {
@@ -432,6 +450,64 @@ fun RunScreen(
             )
             else -> GhostButton("Cancel", Modifier.fillMaxWidth(), onClick = onCancel)
         }
+    }
+}
+
+@Composable
+private fun CodePanel(code: String) {
+    val ctx = LocalContext.current
+    Column(
+        Modifier.fillMaxSize().popIn(0),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            PulseRings(Modifier.size(340.dp), startFrac = 0.45f, spread = 1f)
+            Glass(radius = 30.dp, strong = true) {
+                Column(
+                    Modifier.padding(horizontal = 26.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text("Share code", color = Pal.Ink3, fontSize = 12.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = code,
+                        color = Pal.Ink,
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = "On the other phone: Over the internet, then Receive, then enter this code.",
+            color = Pal.Ink2,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 18.dp)
+        )
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GhostButton("Copy", onClick = {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Blitz code", code))
+                android.widget.Toast.makeText(ctx, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+            })
+            PrimaryButton("Share", onClick = {
+                val i = android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(android.content.Intent.EXTRA_TEXT, "Xcluice Blitz code: $code")
+                ctx.startActivity(android.content.Intent.createChooser(i, "Share code").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            })
+        }
+        Text(
+            text = "Keep this screen open until the receiver joins.",
+            color = Pal.Ink3,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(top = 14.dp)
+        )
     }
 }
 

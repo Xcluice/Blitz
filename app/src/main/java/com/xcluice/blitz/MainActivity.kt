@@ -209,6 +209,8 @@ fun BlitzRoot() {
     var draftAvatar by remember { mutableStateOf(myAvatar) }
     var showHistory by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf(Store.history(ctx)) }
+    var netMenu by remember { mutableStateOf(false) }
+    var netMode by remember { mutableStateOf(false) }
     var discovering by remember { mutableStateOf(false) }
     var asking by remember { mutableStateOf<Peer?>(null) }
     var discoverMsg by remember { mutableStateOf<String?>(null) }
@@ -378,9 +380,13 @@ fun BlitzRoot() {
     BackHandler(enabled = st.phase != Phase.IDLE && st.phase != Phase.TRANSFERRING) {
         Blitz.reset()
     }
-    BackHandler(enabled = st.phase == Phase.IDLE && picking && !discovering && !showHistory && !editingProfile) { picking = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && picking && !discovering && !showHistory && !editingProfile) {
+        picking = false
+        netMode = false
+    }
     BackHandler(enabled = st.phase == Phase.IDLE && discovering && asking == null) { discovering = false }
     BackHandler(enabled = st.phase == Phase.IDLE && showHistory) { showHistory = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && netMenu && !picking) { netMenu = false }
     BackHandler(enabled = st.phase == Phase.IDLE && editingProfile && profileSet) { editingProfile = false }
 
     val tilt = rememberTilt(st.phase == Phase.IDLE || st.phase == Phase.WAITING)
@@ -394,6 +400,7 @@ fun BlitzRoot() {
                 showHistory -> 4
                 discovering -> 3
                 picking -> 1
+                netMenu -> 7
                 else -> 0
             }
             AnimatedContent(
@@ -440,6 +447,7 @@ fun BlitzRoot() {
                             editingProfile = true
                         },
                         onHistory = { showHistory = true },
+                        onInternet = { netMenu = true },
                         onSend = { picking = true },
                         onReceive = {
                             peer = null
@@ -457,6 +465,18 @@ fun BlitzRoot() {
                             clearCrash(ctx)
                             crash = null
                         }
+                    )
+                    7 -> com.xcluice.blitz.ui.NetScreen(
+                        onSend = {
+                            netMode = true
+                            picking = true
+                        },
+                        onReceive = { c ->
+                            peer = Pair("Internet transfer", 0)
+                            netMenu = false
+                            Blitz.startNetReceive(c)
+                        },
+                        onBack = { netMenu = false }
                     )
                     5 -> ProfileScreen(
                         name = if (profileSet || editingProfile) draftName else draftName,
@@ -548,8 +568,15 @@ fun BlitzRoot() {
                             picked = emptyList()
                             selectedApps = emptySet()
                         },
+                        netMode = netMode,
                         onFind = {
-                            withPerms {
+                            if (netMode) {
+                                peer = Pair("Internet transfer", 0)
+                                netMenu = false
+                                netMode = false
+                                picking = false
+                                Blitz.startNetSend(allItems)
+                            } else withPerms {
                                 discoverMsg = null
                                 discovering = true
                             }
@@ -564,7 +591,10 @@ fun BlitzRoot() {
                                 scanLauncher.launch(o)
                             }
                         },
-                        onBack = { picking = false }
+                        onBack = {
+                            picking = false
+                            netMode = false
+                        }
                     )
                     else -> RunScreen(
                         st = st,

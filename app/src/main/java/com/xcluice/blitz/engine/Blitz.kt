@@ -20,9 +20,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.Closeable
+import java.nio.channels.Channels
+import java.util.concurrent.atomic.AtomicInteger
 import java.io.FileInputStream
 import java.io.IOException
 import java.net.InetSocketAddress
@@ -58,6 +61,7 @@ data class UiState(
     val phase: Phase = Phase.IDLE,
     val role: Role? = null,
     val qr: String? = null,
+    val code: String? = null,
     val status: String = "",
     val total: Long = 0,
     val done: Long = 0,
@@ -131,6 +135,41 @@ object Blitz {
         job = scope.launch {
             try {
                 sendFlow(items, pairing, encrypt)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (g == gen) fail(e)
+            } finally {
+                if (g == gen) cleanup()
+            }
+        }
+    }
+
+
+    fun startNetSend(items: List<SendItem>) {
+        if (busy || items.isEmpty()) return
+        val g = ++gen
+        _state.value = UiState(phase = Phase.PREPARING, role = Role.SEND, status = "Reaching the relay…")
+        job = scope.launch {
+            try {
+                netSendFlow(items)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                if (g == gen) fail(e)
+            } finally {
+                if (g == gen) cleanup()
+            }
+        }
+    }
+
+    fun startNetReceive(code: String) {
+        if (busy) return
+        val g = ++gen
+        _state.value = UiState(phase = Phase.PREPARING, role = Role.RECEIVE, status = "Reaching the relay…")
+        job = scope.launch {
+            try {
+                netReceiveFlow(code)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -502,6 +541,255 @@ object Blitz {
         hdr.putInt(0)
         hdr.flip()
         c.writeFully(hdr)
+    }
+
+
+    // ---------- internet (relay) ----------
+
+    private const val SEG_CHUNKS = 16
+
+    private fun chunkCount(metas: List<FileMeta>): Int {
+        var n = 0L
+        for (m in metas) n += (m.size + Proto.CHUNK - 1) / Proto.CHUNK
+        return n.toInt()
+    }
+
+    private fun relay() = Relay(Relay.DEFAULT_URL) { sockets.add(it) }
+
+    /** Check in with the relay until the other phone shows up. The first call may wake a sleeping server. */
+    private suspend fun waitForPeer(r: Relay, room: String, role: String, maxMs: Long): Boolean {
+        val end = System.currentTimeMillis() + maxMs
+        var failures = 0
+        while (System.currentTimeMillis() < end) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            try {
+                if (r.hello(room, role)) return true
+                failures = 0
+            } catch (e: IOException) {
+                failures++
+                if (failures >= 6) throw IOException("Couldn't reach the relay. Check your internet connection.")
+                mutate { s -> s.copy(status = "Waking up the relay…") }
+            }
+            delay(1000)
+        }
+        return false
+    }
+
+    private suspend fun netSendFlow(items: List<SendItem>) = coroutineScope {
+        acquireLocks()
+        KeepAliveService.start(app)
+        val metas = items.map { it.meta }
+        val total = metas.sumOf { it.size }
+        val code = NetCode.generate()
+        val room = NetCode.room(code)
+        val key = NetCode.key(code)
+        val keySpec = SecretKeySpec(key, "AES")
+        val r = relay()
+
+        mutate {
+            it.copy(
+                total = total,
+                items = metas.map { m -> Item(m.name, m.size, null, m.mime) }
+            )
+        }
+        // Check in once so a cold relay wakes up before the code is shown.
+        waitForPeer(r, room, "s", 1L)
+        mutate { it.copy(phase = Phase.WAITING, code = code, status = "Waiting for the receiver to enter the code…") }
+        if (!waitForPeer(r, room, "s", 15 * 60 * 1000L)) throw IOException("Nobody entered the code. Try again.")
+
+        mutate { it.copy(phase = Phase.CONNECTING, code = null, status = "Receiver found. Sending the file list…") }
+        // The manifest is encrypted so the relay can't read file names.
+        val manifest = encodeManifest(metas)
+        val nonce = randomBytes(12)
+        val mc = Cipher.getInstance("AES/GCM/NoPadding")
+        mc.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, nonce))
+        val sealed = nonce + mc.doFinal(manifest)
+        r.upload(room, "m") { out ->
+            val d = java.io.DataOutputStream(out)
+            d.writeInt(sealed.size)
+            d.write(sealed)
+            d.flush()
+        }
+
+        counter.set(0)
+        mutate { it.copy(phase = Phase.TRANSFERRING, encrypt = true, status = "Sending through the internet…") }
+        val t0 = startProgress()
+
+        val chunks = ArrayList<Chunk>()
+        for (i in metas.indices) {
+            var off = 0L
+            while (off < metas[i].size) {
+                val len = minOf(Proto.CHUNK.toLong(), metas[i].size - off).toInt()
+                chunks.add(Chunk(i, off, len))
+                off += len
+            }
+        }
+        val nSeg = (chunks.size + SEG_CHUNKS - 1) / SEG_CHUNKS
+        val nextSeg = AtomicInteger(0)
+        val pfds = CopyOnWriteArrayList<ParcelFileDescriptor>()
+        val files: List<Lazy<FileChannel>> = items.map { si ->
+            lazy {
+                val pfd = app.contentResolver.openFileDescriptor(si.uri, "r")
+                    ?: throw IOException("Couldn't open a file to send")
+                pfds.add(pfd)
+                FileInputStream(pfd.fileDescriptor).channel
+            }
+        }
+        try {
+            val workers = (0 until minOf(Proto.STREAMS, maxOf(1, nSeg))).map {
+                async {
+                    while (true) {
+                        val seg = nextSeg.getAndIncrement()
+                        if (seg >= nSeg) break
+                        val from = seg * SEG_CHUNKS
+                        val to = minOf(chunks.size, from + SEG_CHUNKS)
+                        r.upload(room, "s$seg") { out ->
+                            writeSegment(Channels.newChannel(out), chunks.subList(from, to), files, keySpec)
+                        }
+                    }
+                }
+            }
+            workers.awaitAll()
+            // Best effort: the receiver confirms it has everything.
+            try {
+                r.download(room, "fin", 20_000).close()
+            } catch (_: Throwable) {
+            }
+        } finally {
+            closeAll()
+            for (pfd in pfds) {
+                try {
+                    pfd.close()
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        progressJob?.cancel()
+        val elapsed = (System.nanoTime() - t0) / 1_000_000
+        mutate {
+            it.copy(phase = Phase.DONE, done = it.total, elapsedMs = elapsed, speed = 0.0, eta = 0, status = "Sent")
+        }
+    }
+
+    /** Frames the chunks exactly like the Wi-Fi mode does, always encrypted, then the end marker. */
+    private fun writeSegment(
+        c: java.nio.channels.WritableByteChannel,
+        list: List<Chunk>,
+        files: List<Lazy<FileChannel>>,
+        keySpec: SecretKeySpec
+    ) {
+        val hdrArr = ByteArray(16)
+        val hdr = ByteBuffer.wrap(hdrArr)
+        val plain = ByteBuffer.allocateDirect(Proto.CHUNK)
+        val enc = ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        for (ck in list) {
+            hdr.clear()
+            hdr.putInt(ck.file)
+            hdr.putLong(ck.off)
+            hdr.putInt(ck.len)
+            hdr.flip()
+            val fc = files[ck.file].value
+            plain.clear()
+            plain.limit(ck.len)
+            var pos = ck.off
+            while (plain.hasRemaining()) {
+                val n = fc.read(plain, pos)
+                if (n < 0) throw IOException("A source file ended early")
+                pos += n
+            }
+            plain.flip()
+            cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, nonce(ck.file, ck.off)))
+            cipher.updateAAD(hdrArr)
+            enc.clear()
+            cipher.doFinal(plain, enc)
+            enc.flip()
+            c.writeFully(hdr)
+            c.writeFully(enc)
+            counter.addAndGet(ck.len.toLong())
+        }
+        hdr.clear()
+        hdr.putInt(-1)
+        hdr.putLong(0L)
+        hdr.putInt(0)
+        hdr.flip()
+        c.writeFully(hdr)
+    }
+
+    private suspend fun netReceiveFlow(code: String) = coroutineScope {
+        acquireLocks()
+        KeepAliveService.start(app)
+        val room = NetCode.room(code)
+        val key = NetCode.key(code)
+        val keySpec = SecretKeySpec(key, "AES")
+        val r = relay()
+
+        if (!waitForPeer(r, room, "r", 60_000L)) {
+            throw IOException("No sender found for this code. Check it and make sure the sender is still waiting.")
+        }
+        mutate { it.copy(phase = Phase.CONNECTING, status = "Sender found. Getting the file list…") }
+        val sealed = r.download(room, "m").use { ins ->
+            val d = java.io.DataInputStream(ins)
+            val n = d.readInt()
+            require(n in 28..(8 shl 20)) { "Bad file list" }
+            ByteArray(n).also { d.readFully(it) }
+        }
+        val mc = Cipher.getInstance("AES/GCM/NoPadding")
+        mc.init(Cipher.DECRYPT_MODE, keySpec, GCMParameterSpec(128, sealed.copyOfRange(0, 12)))
+        val metas = try {
+            decodeManifest(mc.doFinal(sealed, 12, sealed.size - 12))
+        } catch (e: Exception) {
+            throw IOException("This code doesn't match the sender.")
+        }
+
+        val rx = RxSession(app, metas, true, key)
+        rxSession = rx
+        rx.open()
+        counter.set(0)
+        mutate {
+            it.copy(
+                phase = Phase.TRANSFERRING,
+                total = rx.total,
+                done = 0,
+                items = metas.map { m -> Item(m.name, m.size, null, m.mime) },
+                status = "Receiving through the internet…",
+                encrypt = true
+            )
+        }
+        val t0 = startProgress()
+        if (rx.total == 0L) rx.result.complete(true)
+
+        val nSeg = (chunkCount(metas) + SEG_CHUNKS - 1) / SEG_CHUNKS
+        val nextSeg = AtomicInteger(0)
+        val workers = (0 until minOf(Proto.STREAMS, maxOf(1, nSeg))).map {
+            async {
+                while (true) {
+                    val seg = nextSeg.getAndIncrement()
+                    if (seg >= nSeg) break
+                    r.download(room, "s$seg").use { ins ->
+                        rx.activeData.incrementAndGet()
+                        try {
+                            rx.readData(Channels.newChannel(ins)) { n -> counter.addAndGet(n) }
+                        } finally {
+                            rx.activeData.decrementAndGet()
+                        }
+                    }
+                }
+            }
+        }
+        workers.awaitAll()
+        if (!rx.result.await()) throw IOException("Transfer incomplete")
+        val items = rx.finish()
+        progressJob?.cancel()
+        try {
+            r.upload(room, "fin", 15_000) { it.write(1) }
+        } catch (_: Throwable) {
+        }
+        val elapsed = (System.nanoTime() - t0) / 1_000_000
+        mutate {
+            it.copy(phase = Phase.DONE, done = it.total, items = items, elapsedMs = elapsed, speed = 0.0, eta = 0, status = "Received")
+        }
+        closeAll()
     }
 
     // ---------- shared plumbing ----------

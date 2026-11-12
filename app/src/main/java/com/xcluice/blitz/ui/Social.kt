@@ -328,3 +328,98 @@ fun HistoryScreen(
         }
     }
 }
+
+// ---------------------------------------------------------------- internet
+
+@Composable
+fun NetScreen(
+    onSend: () -> Unit,
+    onReceive: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    var text by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    val code = com.xcluice.blitz.engine.NetCode.normalize(text)
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Text(
+            text = "\u2039 Back",
+            color = Pal.Ink2,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .bounceClick(onClick = onBack)
+                .padding(vertical = 8.dp)
+        )
+        Text("Internet", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Pal.Ink)
+        Text(
+            text = "Works anywhere. Files are encrypted on your phone and only the other phone can open them.",
+            color = Pal.Ink2,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(top = 4.dp, bottom = 18.dp)
+        )
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .popIn(0)
+                .bounceClick(onClick = onSend)
+                .clip(RoundedCornerShape(28.dp))
+                .background(Pal.Ink)
+                .padding(22.dp)
+        ) {
+            ArrowIcon(up = true, modifier = Modifier.size(24.dp), color = Pal.Bg)
+            Spacer(Modifier.height(22.dp))
+            Text("Send files", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Pal.Bg)
+            Text("Pick files, get a code, share it.", fontSize = 13.sp, color = Pal.Bg.copy(alpha = 0.6f))
+        }
+        Spacer(Modifier.height(14.dp))
+        Glass(Modifier.fillMaxWidth().popIn(80), radius = 28.dp) {
+            Column(Modifier.padding(22.dp)) {
+                ArrowIcon(up = false, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.height(18.dp))
+                Text("Receive", fontSize = 22.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Pal.Fill)
+                        .border(1.dp, Pal.Line, RoundedCornerShape(16.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                ) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { text = it.uppercase().take(14) },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = Pal.Ink,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            textAlign = TextAlign.Center
+                        ),
+                        cursorBrush = SolidColor(Pal.Ink),
+                        modifier = Modifier.fillMaxWidth(),
+                        decorationBox = { inner ->
+                            Box(contentAlignment = Alignment.Center) {
+                                if (text.isEmpty()) {
+                                    Text("XXXX-XXXX-XXXX", color = Pal.Ink3, fontSize = 22.sp,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                                }
+                                inner()
+                            }
+                        }
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                PrimaryButton(
+                    text = "Receive",
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = code != null,
+                    onClick = { if (code != null) onReceive(code) }
+                )
+            }
+        }
+    }
+}

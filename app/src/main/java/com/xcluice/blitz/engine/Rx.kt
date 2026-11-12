@@ -64,7 +64,7 @@ class RxSession(
     }
 
     /** Runs on a data connection until the sender's end frame. Blocking. */
-    fun readData(ch: SocketChannel, onBytes: (Long) -> Unit) {
+    fun readData(ch: java.nio.channels.ReadableByteChannel, onBytes: (Long) -> Unit) {
         try {
             val hdrArr = ByteArray(16)
             val hdr = ByteBuffer.wrap(hdrArr)

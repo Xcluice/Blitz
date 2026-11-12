@@ -74,13 +74,13 @@ fun randomAlnum(n: Int): String {
     return String(CharArray(n) { a[rng.nextInt(a.length)] })
 }
 
-internal fun SocketChannel.readFully(b: ByteBuffer) {
+internal fun java.nio.channels.ReadableByteChannel.readFully(b: ByteBuffer) {
     while (b.hasRemaining()) {
         if (read(b) < 0) throw EOFException("Connection closed")
     }
 }
 
-internal fun SocketChannel.writeFully(b: ByteBuffer) {
+internal fun java.nio.channels.WritableByteChannel.writeFully(b: ByteBuffer) {
     while (b.hasRemaining()) write(b)
 }
 

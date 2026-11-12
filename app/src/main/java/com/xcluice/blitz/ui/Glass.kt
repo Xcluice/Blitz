@@ -416,6 +416,21 @@ fun CheckIcon(modifier: Modifier = Modifier, color: Color = Pal.Bg) {
 }
 
 @Composable
+fun GlobeIcon(modifier: Modifier = Modifier, color: Color = Pal.Ink) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val sw = 1.8.dp.toPx()
+        val r = minOf(w, h) / 2f - sw
+        val c = Offset(w / 2f, h / 2f)
+        drawCircle(color, r, c, style = Stroke(sw))
+        drawOval(color, Offset(c.x - r * 0.45f, c.y - r), Size(r * 0.9f, r * 2f), style = Stroke(sw))
+        drawLine(color, Offset(c.x - r, c.y), Offset(c.x + r, c.y), sw)
+        drawLine(color, Offset(c.x, c.y - r), Offset(c.x, c.y + r), sw)
+    }
+}
+
+@Composable
 fun SparkIcon(modifier: Modifier = Modifier, filled: Boolean, color: Color = Pal.Ink) {
     Canvas(modifier) {
         val w = size.width
