@@ -10,7 +10,7 @@ android {
 
     defaultConfig {
         applicationId = "com.xcluice.blitz"
-        minSdk = 29
+        minSdk = 26
         targetSdk = 34
         versionCode = (project.findProperty("appCode") as String?)?.toInt() ?: 1
         versionName = (project.findProperty("appVersion") as String?) ?: "0.1.0"

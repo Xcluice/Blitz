@@ -243,7 +243,7 @@ object Blitz {
         val err = h.start(ssid, pass)
         if (err != null) throw IOException(err)
 
-        val pairing = Pairing(ssid, pass, h.ip(), port, token, key)
+        val pairing = Pairing(h.ssid ?: ssid, h.pass ?: pass, h.ip(), port, token, key)
         mutate { it.copy(phase = Phase.WAITING, qr = pairing.toUri(), status = "Waiting for the sender to scan…") }
 
         val finished = CompletableDeferred<Unit>()

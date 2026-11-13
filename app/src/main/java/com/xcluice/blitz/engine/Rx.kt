@@ -3,7 +3,12 @@ package com.xcluice.blitz.engine
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.media.MediaScannerConnection
+import androidx.core.content.FileProvider
+import java.io.File
+import java.io.RandomAccessFile
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.system.Os
@@ -38,13 +43,49 @@ class RxSession(
     private val uris = ArrayList<Uri>()
     private val pfds = ArrayList<ParcelFileDescriptor>()
     private val chans = ArrayList<FileChannel>()
+    private val legacy = Build.VERSION.SDK_INT < 29
+    private val files = ArrayList<File>()
+    private val rafs = ArrayList<RandomAccessFile>()
 
     private fun safe(name: String): String {
         val s = name.replace(Regex("[\\\\/:*?\"<>|\\x00-\\x1F]"), "_").trim().trimStart('.')
         return (if (s.isEmpty()) "file" else s).take(180)
     }
 
+    private fun uniqueFile(dir: File, name: String): File {
+        var f = File(dir, name)
+        if (!f.exists()) return f
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var n = 1
+        while (f.exists()) {
+            f = File(dir, "$base ($n)$ext")
+            n++
+        }
+        return f
+    }
+
+    /** Android 8 and 9: no MediaStore.Downloads, write straight into the public Downloads folder. */
+    @Suppress("DEPRECATION")
+    private fun openLegacy() {
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Xcluice Blitz")
+        if (!dir.exists() && !dir.mkdirs()) throw IOException("Couldn't create the Xcluice Blitz folder in Downloads")
+        for (m in metas) {
+            val f = uniqueFile(dir, safe(m.name))
+            val raf = RandomAccessFile(f, "rw")
+            if (m.size > 0) raf.setLength(m.size)
+            files.add(f)
+            rafs.add(raf)
+            chans.add(raf.channel)
+        }
+    }
+
     fun open() {
+        if (legacy) {
+            openLegacy()
+            return
+        }
         val cr = ctx.contentResolver
         for (m in metas) {
             val cv = ContentValues()
@@ -118,14 +159,28 @@ class RxSession(
                 chans[i].close()
             } catch (_: Throwable) {
             }
-            try {
-                pfds[i].close()
-            } catch (_: Throwable) {
+            if (legacy) {
+                try {
+                    rafs[i].close()
+                } catch (_: Throwable) {
+                }
+                val f = files[i]
+                try {
+                    MediaScannerConnection.scanFile(ctx, arrayOf(f.absolutePath), arrayOf(metas[i].mime), null)
+                } catch (_: Throwable) {
+                }
+                val u = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+                out.add(Item(metas[i].name, metas[i].size, u, metas[i].mime))
+            } else {
+                try {
+                    pfds[i].close()
+                } catch (_: Throwable) {
+                }
+                val cv = ContentValues()
+                cv.put(MediaStore.Downloads.IS_PENDING, 0)
+                ctx.contentResolver.update(uris[i], cv, null, null)
+                out.add(Item(metas[i].name, metas[i].size, uris[i], metas[i].mime))
             }
-            val cv = ContentValues()
-            cv.put(MediaStore.Downloads.IS_PENDING, 0)
-            ctx.contentResolver.update(uris[i], cv, null, null)
-            out.add(Item(metas[i].name, metas[i].size, uris[i], metas[i].mime))
         }
         return out
     }
@@ -141,6 +196,18 @@ class RxSession(
         for (p in pfds) {
             try {
                 p.close()
+            } catch (_: Throwable) {
+            }
+        }
+        for (r in rafs) {
+            try {
+                r.close()
+            } catch (_: Throwable) {
+            }
+        }
+        for (f in files) {
+            try {
+                f.delete()
             } catch (_: Throwable) {
             }
         }

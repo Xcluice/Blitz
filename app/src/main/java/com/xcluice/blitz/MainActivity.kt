@@ -339,6 +339,9 @@ fun BlitzRoot() {
     fun withPerms(action: () -> Unit) {
         val need = ArrayList<String>()
         if (!hasPerm(ctx, WIFI_PERM)) need.add(WIFI_PERM)
+        if (Build.VERSION.SDK_INT < 29 && !hasPerm(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+            need.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        }
         if (Build.VERSION.SDK_INT >= 31) {
             for (bp in arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,

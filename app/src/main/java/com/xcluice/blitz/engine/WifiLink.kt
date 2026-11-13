@@ -6,10 +6,12 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.net.wifi.WifiNetworkSpecifier
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pManager
+import android.os.Build
 import android.os.Looper
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -86,6 +88,10 @@ class P2pHost(private val ctx: Context) {
     private val mgr = ctx.getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
     private var ch: WifiP2pManager.Channel? = null
 
+    /** The credentials the group really uses. On Android 8 and 9 the system picks them. */
+    @Volatile var ssid: String? = null
+    @Volatile var pass: String? = null
+
     private fun cfg(ssid: String, pass: String, band: Int): WifiP2pConfig =
         WifiP2pConfig.Builder()
             .setNetworkName(ssid)
@@ -101,6 +107,26 @@ class P2pHost(private val ctx: Context) {
         ch = c
         p2pAction { mgr.removeGroup(c, it) }
         delay(300)
+        if (Build.VERSION.SDK_INT < 29) {
+            val lr = p2pAction { mgr.createGroup(c, it) }
+            if (lr != OK) return "Couldn't start Wi-Fi Direct (code $lr). Turn on Wi-Fi and Location, then retry."
+            for (i in 0 until 20) {
+                val g = suspendCancellableCoroutine<android.net.wifi.p2p.WifiP2pGroup?> { cc ->
+                    mgr.requestGroupInfo(c) { grp -> if (cc.isActive) cc.resume(grp) }
+                }
+                val n = g?.networkName
+                val pw = g?.passphrase
+                if (!n.isNullOrEmpty() && !pw.isNullOrEmpty()) {
+                    this.ssid = n
+                    this.pass = pw
+                    return null
+                }
+                delay(250)
+            }
+            return "Couldn't read the Wi-Fi Direct group details. Turn Wi-Fi and Location off and on, then retry."
+        }
+        this.ssid = ssid
+        this.pass = pass
         var r = p2pAction { mgr.createGroup(c, cfg(ssid, pass, WifiP2pConfig.GROUP_OWNER_BAND_5GHZ), it) }
         if (r != OK) {
             delay(400)
@@ -151,6 +177,9 @@ class P2pClient(private val ctx: Context) {
         val wm = ctx.getSystemService(Context.WIFI_SERVICE) as WifiManager
         if (!wm.isWifiEnabled) throw IOException("Wi-Fi is off. Turn Wi-Fi on and try again.")
         status("Joining the receiver's Wi-Fi Direct group…")
+        if (Build.VERSION.SDK_INT < 29) {
+            return if (tryLegacy(p)) dialUntil(p, 14_000) else null
+        }
         if (tryP2p(p)) {
             val s = dialUntil(p, 14_000)
             if (s != null) return s
@@ -165,6 +194,38 @@ class P2pClient(private val ctx: Context) {
             return dialUntil(p, 10_000)
         }
         return null
+    }
+
+    private var legacyNetId = -1
+
+    /** Android 8 and 9: join the group's Wi-Fi network with the old WifiConfiguration API. */
+    @Suppress("DEPRECATION")
+    private suspend fun tryLegacy(p: Pairing): Boolean {
+        return try {
+            val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val conf = WifiConfiguration()
+            conf.SSID = "\"" + p.ssid + "\""
+            conf.preSharedKey = "\"" + p.pass + "\""
+            conf.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
+            val id = wm.addNetwork(conf)
+            if (id == -1) return false
+            legacyNetId = id
+            wm.disconnect()
+            if (!wm.enableNetwork(id, true)) return false
+            wm.reconnect()
+            val end = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < end) {
+                currentCoroutineContext().ensureActive()
+                val info = wm.connectionInfo
+                if (info != null && info.networkId == id && info.ipAddress != 0) return true
+                delay(300)
+            }
+            false
+        } catch (e: IOException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
     private suspend fun tryP2p(p: Pairing): Boolean {
@@ -260,7 +321,17 @@ class P2pClient(private val ctx: Context) {
         return null
     }
 
+    @Suppress("DEPRECATION")
     fun release() {
+        if (legacyNetId != -1) {
+            try {
+                val wm = ctx.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                wm.removeNetwork(legacyNetId)
+                wm.reconnect()
+            } catch (_: Throwable) {
+            }
+            legacyNetId = -1
+        }
         val callback = cb
         cb = null
         if (callback != null) {
