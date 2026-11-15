@@ -64,6 +64,7 @@ import com.xcluice.blitz.ui.HomeScreen
 import com.xcluice.blitz.ui.RunScreen
 import com.xcluice.blitz.ui.SendScreen
 import com.xcluice.blitz.ui.appSendItems
+import com.xcluice.blitz.ui.groupReceived
 import com.xcluice.blitz.ui.fmtBytes
 import com.xcluice.blitz.ui.loadApps
 import com.xcluice.blitz.engine.ApkInstaller
@@ -208,6 +209,19 @@ fun BlitzRoot() {
     var draftName by remember { mutableStateOf(myName) }
     var draftAvatar by remember { mutableStateOf(myAvatar) }
     var showHistory by remember { mutableStateOf(false) }
+    var dl by remember { mutableStateOf<com.xcluice.blitz.engine.DlList?>(null) }
+    var dlTick by remember { mutableStateOf(0) }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, ev ->
+            if (ev == androidx.lifecycle.Lifecycle.Event.ON_RESUME) dlTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+    LaunchedEffect(dlTick, st.phase) {
+        dl = withContext(Dispatchers.IO) { com.xcluice.blitz.engine.Downloads.list(ctx) }
+    }
     var history by remember { mutableStateOf(Store.history(ctx)) }
     var netMenu by remember { mutableStateOf(false) }
     var netMode by remember { mutableStateOf(false) }
@@ -336,7 +350,19 @@ fun BlitzRoot() {
         }
     }
 
-    fun withPerms(action: () -> Unit) {
+    fun withPerms(needLocation: Boolean = true, action: () -> Unit) {
+        // Android 8-11 only open a Wi-Fi Direct link while Location is switched on.
+        if (needLocation && Build.VERSION.SDK_INT < 31) {
+            val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            if (!androidx.core.location.LocationManagerCompat.isLocationEnabled(lm)) {
+                Toast.makeText(ctx, "Turn on Location to share files (Android needs it for Wi-Fi Direct).", Toast.LENGTH_LONG).show()
+                try {
+                    ctx.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+                } catch (_: Exception) {
+                }
+                return
+            }
+        }
         val need = ArrayList<String>()
         if (!hasPerm(ctx, WIFI_PERM)) need.add(WIFI_PERM)
         if (Build.VERSION.SDK_INT < 29 && !hasPerm(ctx, Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
@@ -455,7 +481,10 @@ fun BlitzRoot() {
                         onReceive = {
                             peer = null
                             withPerms { Blitz.startReceive() }
-                        }
+                        },
+                        files = remember(dl) { groupReceived(dl?.items ?: emptyList()) },
+                        fileDates = dl?.modified ?: emptyMap(),
+                        onOpenFile = { row -> openItems(ctx, scope, row.parts) }
                     )
                     6 -> com.xcluice.blitz.ui.CrashScreen(
                         report = crash ?: "",
@@ -537,7 +566,7 @@ fun BlitzRoot() {
                         },
                         onScan = {
                             discovering = false
-                            withPerms {
+                            withPerms(needLocation = false) {
                                 val o = ScanOptions()
                                 o.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                 o.setPrompt("Scan the code on the receiving phone")
@@ -585,7 +614,7 @@ fun BlitzRoot() {
                             }
                         },
                         onScan = {
-                            withPerms {
+                            withPerms(needLocation = false) {
                                 val o = ScanOptions()
                                 o.setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                 o.setPrompt("Scan the code on the receiving phone")

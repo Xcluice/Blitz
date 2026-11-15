@@ -125,8 +125,11 @@ fun buildBundle(ctx: Context, app: AppEntry): SendItem {
     val out = File(dir, app.pkg + ".apks")
     java.util.zip.ZipOutputStream(out.outputStream().buffered(1 shl 16)).use { zip ->
         zip.setLevel(java.util.zip.Deflater.BEST_SPEED)
+        val used = HashSet<String>()
         for (i in app.paths.indices) {
-            zip.putNextEntry(java.util.zip.ZipEntry(if (i == 0) "base.apk" else "split$i.apk"))
+            var entry = if (i == 0) "base.apk" else File(app.paths[i]).name
+            if (!used.add(entry)) entry = "split$i-$entry"
+            zip.putNextEntry(java.util.zip.ZipEntry(entry))
             File(app.paths[i]).inputStream().use { it.copyTo(zip, 1 shl 16) }
             zip.closeEntry()
         }

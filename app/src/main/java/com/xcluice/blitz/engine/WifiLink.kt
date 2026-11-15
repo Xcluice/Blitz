@@ -207,6 +207,10 @@ class P2pClient(private val ctx: Context) {
             conf.SSID = "\"" + p.ssid + "\""
             conf.preSharedKey = "\"" + p.pass + "\""
             conf.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_PSK)
+            conf.allowedProtocols.set(WifiConfiguration.Protocol.RSN)
+            conf.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP)
+            conf.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP)
+            conf.status = WifiConfiguration.Status.ENABLED
             val id = wm.addNetwork(conf)
             if (id == -1) return false
             legacyNetId = id
@@ -217,7 +221,15 @@ class P2pClient(private val ctx: Context) {
             while (System.currentTimeMillis() < end) {
                 currentCoroutineContext().ensureActive()
                 val info = wm.connectionInfo
-                if (info != null && info.networkId == id && info.ipAddress != 0) return true
+                if (info != null && info.networkId == id && info.ipAddress != 0) {
+                    wifiNetwork()?.let { n ->
+                        try {
+                            bound = cm.bindProcessToNetwork(n)
+                        } catch (_: Throwable) {
+                        }
+                    }
+                    return true
+                }
                 delay(300)
             }
             false
@@ -299,12 +311,26 @@ class P2pClient(private val ctx: Context) {
 
     private var bound = false
 
+    /** Android 8/9 join the group as a plain Wi-Fi client; it has no internet, so traffic must be pinned to it. */
+    @Suppress("DEPRECATION")
+    private fun wifiNetwork(): Network? {
+        return try {
+            for (n in cm.allNetworks) {
+                val caps = cm.getNetworkCapabilities(n) ?: continue
+                if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) return n
+            }
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     private suspend fun dialUntil(p: Pairing, ms: Long): SocketChannel? {
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) {
             currentCoroutineContext().ensureActive()
             if (!bound) {
-                val n = p2pNetwork()
+                val n = p2pNetwork() ?: (if (legacyNetId != -1) wifiNetwork() else null)
                 if (n != null) {
                     try {
                         bound = cm.bindProcessToNetwork(n)

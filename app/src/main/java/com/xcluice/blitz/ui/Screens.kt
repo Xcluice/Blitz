@@ -84,7 +84,10 @@ fun HomeScreen(
     onHistory: () -> Unit,
     onInternet: () -> Unit,
     onSend: () -> Unit,
-    onReceive: () -> Unit
+    onReceive: () -> Unit,
+    files: List<ReceivedRow> = emptyList(),
+    fileDates: Map<String, Long> = emptyMap(),
+    onOpenFile: (ReceivedRow) -> Unit = {}
 ) {
     Column(
         Modifier
@@ -124,26 +127,33 @@ fun HomeScreen(
                 }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth().popIn(60), contentAlignment = Alignment.Center) {
-            PulseRings(Modifier.size(300.dp), startFrac = 0.28f, spread = 1f)
-            Glass(Modifier.size(104.dp), radius = 52.dp, strong = true) {
-                FloatingBolt(Modifier.align(Alignment.Center).size(44.dp))
+        if (files.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth().popIn(60), contentAlignment = Alignment.Center) {
+                PulseRings(Modifier.size(300.dp), startFrac = 0.28f, spread = 1f)
+                Glass(Modifier.size(104.dp), radius = 52.dp, strong = true) {
+                    FloatingBolt(Modifier.align(Alignment.Center).size(44.dp))
+                }
             }
+            Text(
+                text = "Phone to phone,\nstraight line.",
+                fontSize = 34.sp,
+                lineHeight = 38.sp,
+                fontWeight = FontWeight.Bold,
+                color = Pal.Ink,
+                modifier = Modifier.popIn(120)
+            )
+            Text(
+                text = "No internet. No cables. Just speed.",
+                color = Pal.Ink2,
+                fontSize = 15.sp,
+                modifier = Modifier.popIn(160).padding(top = 8.dp, bottom = 26.dp)
+            )
+        } else {
+            FolderPanel(
+                files, fileDates, onOpenFile,
+                Modifier.weight(1f).fillMaxWidth().padding(top = 14.dp, bottom = 16.dp)
+            )
         }
-        Text(
-            text = "Phone to phone,\nstraight line.",
-            fontSize = 34.sp,
-            lineHeight = 38.sp,
-            fontWeight = FontWeight.Bold,
-            color = Pal.Ink,
-            modifier = Modifier.popIn(120)
-        )
-        Text(
-            text = "No internet. No cables. Just speed.",
-            color = Pal.Ink2,
-            fontSize = 15.sp,
-            modifier = Modifier.popIn(160).padding(top = 8.dp, bottom = 26.dp)
-        )
         Row(
             Modifier.fillMaxWidth().popIn(200),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -173,6 +183,88 @@ fun HomeScreen(
             Chip("AES-GCM")
         }
         Spacer(Modifier.height(6.dp))
+    }
+}
+
+private fun ago(t: Long): String {
+    if (t <= 0L) return ""
+    val d = (System.currentTimeMillis() - t) / 1000
+    return when {
+        d < 60 -> "just now"
+        d < 3600 -> "${d / 60}m ago"
+        d < 86400 -> "${d / 3600}h ago"
+        d < 7 * 86400 -> "${d / 86400}d ago"
+        else -> java.text.SimpleDateFormat("d MMM", Locale.getDefault()).format(java.util.Date(t))
+    }
+}
+
+private fun badge(name: String): String {
+    val ext = name.substringAfterLast('.', "").uppercase()
+    return if (ext.isEmpty() || ext.length > 4) "FILE" else ext
+}
+
+/** Everything in Downloads/Xcluice Blitz, newest first. Tap a row to open it (apps install). */
+@Composable
+private fun FolderPanel(
+    rows: List<ReceivedRow>,
+    dates: Map<String, Long>,
+    onOpen: (ReceivedRow) -> Unit,
+    modifier: Modifier
+) {
+    Glass(modifier.popIn(60), radius = 28.dp) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Xcluice Blitz", color = Pal.Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Downloads folder", color = Pal.Ink3, fontSize = 12.sp)
+                }
+                Chip("${rows.size} ${if (rows.size == 1) "item" else "items"}")
+            }
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 12.dp)
+            ) {
+                itemsIndexed(rows, key = { _, r -> r.item.name + (r.item.uri?.toString() ?: "") }) { i, r ->
+                    val size = r.parts.sumOf { it.size }
+                    val isApp = r.item.name.endsWith(".apk", true) || r.item.name.endsWith(".apks", true)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .popIn(minOf(i, 8) * 40)
+                            .bounceClick { onOpen(r) }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            Modifier
+                                .size(46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Pal.FillStrong)
+                                .border(1.dp, Pal.Line, RoundedCornerShape(14.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(badge(r.item.name), color = Pal.Ink, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(r.item.name, color = Pal.Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val when_ = ago(dates[r.item.name] ?: 0L)
+                            Text(
+                                fmtBytes(size) + if (when_.isEmpty()) "" else " · $when_",
+                                color = Pal.Ink2, fontSize = 12.sp
+                            )
+                        }
+                        if (isApp) {
+                            Spacer(Modifier.width(8.dp))
+                            Chip("Install")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
