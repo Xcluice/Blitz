@@ -109,7 +109,7 @@ class RxSession(
         try {
             val hdrArr = ByteArray(16)
             val hdr = ByteBuffer.wrap(hdrArr)
-            val plain = ByteBuffer.allocateDirect(Proto.CHUNK)
+            var plain = ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG + 64)
             val enc = if (encrypted) ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG) else null
             val cipher = if (encrypted) Cipher.getInstance("AES/GCM/NoPadding") else null
             while (true) {
@@ -135,6 +135,12 @@ class RxSession(
                     enc.flip()
                     cipher.init(Cipher.DECRYPT_MODE, keySpec, GCMParameterSpec(128, nonce(fi, off)))
                     cipher.updateAAD(hdrArr)
+                    val need = cipher.getOutputSize(enc.remaining())
+                    if (plain.capacity() < need) {
+                        plain = ByteBuffer.allocateDirect(need)
+                    } else {
+                        plain.clear()
+                    }
                     cipher.doFinal(enc, plain)
                     plain.flip()
                 }

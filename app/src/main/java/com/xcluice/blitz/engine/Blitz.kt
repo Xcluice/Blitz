@@ -493,7 +493,7 @@ object Blitz {
         val hdrArr = ByteArray(16)
         val hdr = ByteBuffer.wrap(hdrArr)
         val plain = if (encrypt) ByteBuffer.allocateDirect(Proto.CHUNK) else null
-        val enc = if (encrypt) ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG) else null
+        var enc = if (encrypt) ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG + 64) else null
         val cipher = if (encrypt) Cipher.getInstance("AES/GCM/NoPadding") else null
 
         while (true) {
@@ -527,11 +527,18 @@ object Blitz {
                 plain.flip()
                 cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, nonce(ck.file, ck.off)))
                 cipher.updateAAD(hdrArr)
-                enc!!.clear()
-                cipher.doFinal(plain, enc)
-                enc.flip()
+                val need = cipher.getOutputSize(plain.remaining())
+                var out = enc!!
+                if (out.capacity() < need) {
+                    out = ByteBuffer.allocateDirect(need)
+                    enc = out
+                } else {
+                    out.clear()
+                }
+                cipher.doFinal(plain, out)
+                out.flip()
                 c.writeFully(hdr)
-                c.writeFully(enc)
+                c.writeFully(out)
                 counter.addAndGet(ck.len.toLong())
             }
         }
@@ -681,7 +688,7 @@ object Blitz {
         val hdrArr = ByteArray(16)
         val hdr = ByteBuffer.wrap(hdrArr)
         val plain = ByteBuffer.allocateDirect(Proto.CHUNK)
-        val enc = ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG)
+        var enc = ByteBuffer.allocateDirect(Proto.CHUNK + Proto.TAG + 64)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         for (ck in list) {
             hdr.clear()
@@ -701,7 +708,12 @@ object Blitz {
             plain.flip()
             cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, nonce(ck.file, ck.off)))
             cipher.updateAAD(hdrArr)
-            enc.clear()
+            val need = cipher.getOutputSize(plain.remaining())
+            if (enc.capacity() < need) {
+                enc = ByteBuffer.allocateDirect(need)
+            } else {
+                enc.clear()
+            }
             cipher.doFinal(plain, enc)
             enc.flip()
             c.writeFully(hdr)
