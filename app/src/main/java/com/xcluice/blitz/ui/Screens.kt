@@ -80,6 +80,7 @@ fun HomeScreen(
     updateText: String?,
     updateBusy: Boolean,
     onUpdate: () -> Unit,
+    onAbout: () -> Unit,
     onProfile: () -> Unit,
     onHistory: () -> Unit,
     onInternet: () -> Unit,
@@ -95,9 +96,16 @@ fun HomeScreen(
             .padding(horizontal = 22.dp, vertical = 14.dp)
     ) {
         Row(Modifier.fillMaxWidth().popIn(0), verticalAlignment = Alignment.CenterVertically) {
-            BoltIcon(Modifier.size(22.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("Blitz", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
+            Row(
+                Modifier
+                    .bounceClick(onClick = onAbout)
+                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                BoltIcon(Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Blitz", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink)
+            }
             Spacer(Modifier.weight(1f))
             Box(Modifier.bounceClick(onClick = onHistory)) { Chip("History") }
             Spacer(Modifier.width(10.dp))

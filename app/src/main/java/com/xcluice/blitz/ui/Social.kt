@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -326,6 +327,142 @@ fun HistoryScreen(
         if (records.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             GhostButton("Clear history", Modifier.fillMaxWidth(), onClick = onClear)
+        }
+    }
+}
+
+// ---------------------------------------------------------------- about / changelog
+
+private data class ChangeEntry(val title: String, val tag: String, val items: List<String>)
+
+private val CHANGELOG = listOf(
+    ChangeEntry(
+        title = "Version & Changelog",
+        tag = "Latest",
+        items = listOf(
+            "Tap the Blitz logo on the top left to view app version and changelog.",
+            "Fixed AES-GCM output buffer sizing error during encrypted transfers on Android 8+."
+        )
+    ),
+    ChangeEntry(
+        title = "Android 8 & Downloads Folder",
+        tag = "Compatibility",
+        items = listOf(
+            "Added Android 8.0/8.1 (Oreo) Wi-Fi Direct and legacy storage support.",
+            "Added ABI-aware .apks split-APK bundling and one-tap installation.",
+            "Added live Downloads/Xcluice Blitz folder browser on the home screen."
+        )
+    ),
+    ChangeEntry(
+        title = "Internet Sharing & Updates",
+        tag = "Relay",
+        items = listOf(
+            "Send files anywhere over the internet with end-to-end encrypted share codes.",
+            "Added automatic in-app delta updates with full-APK fallback."
+        )
+    ),
+    ChangeEntry(
+        title = "Core Transfer Engine",
+        tag = "Foundation",
+        items = listOf(
+            "5 GHz Wi-Fi Direct 4-stream parallel transfers with AES-GCM encryption.",
+            "Bluetooth LE nearby discovery with profiles, avatars, and transfer history."
+        )
+    )
+)
+
+@Composable
+fun AboutScreen(
+    versionName: String,
+    versionCode: Int,
+    updateText: String?,
+    updateBusy: Boolean,
+    onUpdate: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Text(
+            text = "\u2039 Back",
+            color = Pal.Ink2,
+            fontSize = 16.sp,
+            modifier = Modifier
+                .bounceClick(onClick = onBack)
+                .padding(vertical = 8.dp)
+        )
+        Text("About", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Pal.Ink)
+        Spacer(Modifier.height(12.dp))
+        Glass(Modifier.fillMaxWidth().popIn(0), radius = 26.dp, strong = true) {
+            Column(Modifier.padding(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Pal.FillStrong)
+                            .border(1.dp, Pal.Line, RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        BoltIcon(Modifier.size(24.dp))
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Xcluice Blitz", color = Pal.Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                        val ver = if (versionName.isNotEmpty()) "v$versionName (build $versionCode)" else "Build $versionCode"
+                        Text(ver, color = Pal.Ink2, fontSize = 13.sp)
+                    }
+                    if (updateText == null) {
+                        Text("Up to date", color = Pal.Ink3, fontSize = 12.sp)
+                    }
+                }
+                if (updateText != null) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(updateText, color = Pal.Ink, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                        if (updateBusy) Spinner(Modifier.size(26.dp).padding(end = 6.dp))
+                        else PrimaryButton("Update", onClick = onUpdate)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        Text(
+            text = "Changelog",
+            color = Pal.Ink2,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+        )
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            itemsIndexed(CHANGELOG) { idx, entry ->
+                Glass(Modifier.fillMaxWidth().popIn(40 + idx * 45), radius = 22.dp) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = entry.title,
+                                color = Pal.Ink,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(entry.tag, color = Pal.Ink3, fontSize = 11.sp)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        for (line in entry.items) {
+                            Row(Modifier.padding(vertical = 2.dp)) {
+                                Text("\u2022  ", color = Pal.Ink3, fontSize = 13.sp)
+                                Text(line, color = Pal.Ink2, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

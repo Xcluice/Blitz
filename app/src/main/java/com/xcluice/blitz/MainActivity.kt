@@ -49,6 +49,7 @@ import kotlinx.coroutines.delay
 import com.xcluice.blitz.engine.SendItem
 import com.xcluice.blitz.engine.Nearby
 import com.xcluice.blitz.engine.Peer
+import com.xcluice.blitz.ui.AboutScreen
 import com.xcluice.blitz.ui.DiscoverScreen
 import com.xcluice.blitz.ui.HistoryScreen
 import com.xcluice.blitz.ui.ProfileScreen
@@ -209,6 +210,7 @@ fun BlitzRoot() {
     var draftName by remember { mutableStateOf(myName) }
     var draftAvatar by remember { mutableStateOf(myAvatar) }
     var showHistory by remember { mutableStateOf(false) }
+    var showAbout by remember { mutableStateOf(false) }
     var dl by remember { mutableStateOf<com.xcluice.blitz.engine.DlList?>(null) }
     var dlTick by remember { mutableStateOf(0) }
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
@@ -406,15 +408,42 @@ fun BlitzRoot() {
         }
     }
 
+    val updateLabel = update?.let {
+        if (updateBusy) "Downloading ${it.version}… $updatePct%"
+        else if (it.patchUrl != null) "Update ${it.version} · small download (${fmtBytes(it.patchSize)})"
+        else "Update available: ${it.version}"
+    }
+    val triggerUpdate: () -> Unit = {
+        val info = update
+        if (info != null && !updateBusy) {
+            updateBusy = true
+            updatePct = 0
+            scope.launch {
+                val res = withContext(Dispatchers.IO) {
+                    com.xcluice.blitz.engine.Updater.download(ctx, info) { updatePct = (it * 100).toInt() }
+                }
+                val f = res?.file
+                updateBusy = false
+                if (f == null) {
+                    Toast.makeText(ctx, "Download failed. Check your internet.", Toast.LENGTH_LONG).show()
+                } else {
+                    val err = com.xcluice.blitz.engine.Updater.install(ctx, f)
+                    if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     BackHandler(enabled = st.phase != Phase.IDLE && st.phase != Phase.TRANSFERRING) {
         Blitz.reset()
     }
-    BackHandler(enabled = st.phase == Phase.IDLE && picking && !discovering && !showHistory && !editingProfile) {
+    BackHandler(enabled = st.phase == Phase.IDLE && picking && !discovering && !showHistory && !showAbout && !editingProfile) {
         picking = false
         netMode = false
     }
     BackHandler(enabled = st.phase == Phase.IDLE && discovering && asking == null) { discovering = false }
     BackHandler(enabled = st.phase == Phase.IDLE && showHistory) { showHistory = false }
+    BackHandler(enabled = st.phase == Phase.IDLE && showAbout) { showAbout = false }
     BackHandler(enabled = st.phase == Phase.IDLE && netMenu && !picking) { netMenu = false }
     BackHandler(enabled = st.phase == Phase.IDLE && editingProfile && profileSet) { editingProfile = false }
 
@@ -426,6 +455,7 @@ fun BlitzRoot() {
                 crash != null -> 6
                 st.phase != Phase.IDLE -> 2
                 editingProfile || !profileSet -> 5
+                showAbout -> 8
                 showHistory -> 4
                 discovering -> 3
                 picking -> 1
@@ -442,32 +472,10 @@ fun BlitzRoot() {
             ) { s ->
                 when (s) {
                     0 -> HomeScreen(
-                        updateText = update?.let {
-                            if (updateBusy) "Downloading ${it.version}… $updatePct%"
-                            else if (it.patchUrl != null) "Update ${it.version} · small download (${fmtBytes(it.patchSize)})"
-                            else "Update available: ${it.version}"
-                        },
+                        updateText = updateLabel,
                         updateBusy = updateBusy,
-                        onUpdate = {
-                            val info = update
-                            if (info != null && !updateBusy) {
-                                updateBusy = true
-                                updatePct = 0
-                                scope.launch {
-                                    val dl = withContext(Dispatchers.IO) {
-                                        com.xcluice.blitz.engine.Updater.download(ctx, info) { updatePct = (it * 100).toInt() }
-                                    }
-                                    val f = dl?.file
-                                    updateBusy = false
-                                    if (f == null) {
-                                        Toast.makeText(ctx, "Download failed. Check your internet.", Toast.LENGTH_LONG).show()
-                                    } else {
-                                        val err = com.xcluice.blitz.engine.Updater.install(ctx, f)
-                                        if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
-                                    }
-                                }
-                            }
-                        },
+                        onUpdate = triggerUpdate,
+                        onAbout = { showAbout = true },
                         myName = myName,
                         myAvatar = myAvatar,
                         onProfile = {
@@ -485,6 +493,14 @@ fun BlitzRoot() {
                         files = remember(dl) { groupReceived(dl?.items ?: emptyList()) },
                         fileDates = dl?.modified ?: emptyMap(),
                         onOpenFile = { row -> openItems(ctx, scope, row.parts) }
+                    )
+                    8 -> AboutScreen(
+                        versionName = remember { com.xcluice.blitz.engine.Updater.currentName(ctx) },
+                        versionCode = remember { com.xcluice.blitz.engine.Updater.currentCode(ctx) },
+                        updateText = updateLabel,
+                        updateBusy = updateBusy,
+                        onUpdate = triggerUpdate,
+                        onBack = { showAbout = false }
                     )
                     6 -> com.xcluice.blitz.ui.CrashScreen(
                         report = crash ?: "",
